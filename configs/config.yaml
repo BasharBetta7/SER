@@ -1,0 +1,23 @@
+COSER:
+  n_mfcc: 40
+  input_dim_mfcc: 512
+  input_dim_wav: 512
+  n_heads_coatt: 4
+  embed_dim: 256
+  n_classes: 4
+  dropout_lstm: 0.1
+  num_encoders_satt: 1
+  embed_dim_satt: 1024
+  n_heads_satt: 1
+  dropout_satt: 0.0
+  pooling: "avg"
+  lr: 4e-5
+
+DATASET:
+  wav_path: "./data/iemocap"
+  wav_csv: "./data/iemocap.csv"
+  sr: 16000
+
+
+  
+
