@@ -11,12 +11,14 @@ COSER:
   n_heads_satt: 1
   dropout_satt: 0.0
   pooling: "avg"
-  lr: 4e-5
+  lr: 1e-4
+  ssl_model: "wavlm"
 
 DATASET:
   wav_path: "./data/iemocap"
   wav_csv: "./data/iemocap.csv"
   sr: 16000
+  
 
 
   

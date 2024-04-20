@@ -1,1 +1,6 @@
 /data/iemocap
+/notebooks/
+/checkpoints
+/WavLM_Checkpoints/
+/play_around/
+/.vscode/

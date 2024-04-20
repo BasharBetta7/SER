@@ -490,3 +490,246 @@ class SER_MFCCConcat(nn.Module): # avg + avg_mfcc, std+std_mfcc
         #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
         return logits, loss
         
+        
+        
+        
+        
+class SER3(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, n_labels=4):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.1)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=1, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=1)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttention(input_dim_mfcc, input_dim_wav,embed_dim, n_heads)
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(embed_dim, n_labels)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+       
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, embed_dim), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav.mean(1)) #(B, n_labels)
+
+
+         ########## visualize output tensors to find abnormality ###############
+        
+        # legends = 'wav_enc,mfcc_enc,wav_enc_lin,mfcc_enc_lin,mfcc_aware_wav,logits'.split(sep=',')
+        # plt.figure(figsize=(20,4))
+        # t = wav_enc[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = mfcc_enc[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = wav_enc_lin[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = mfcc_enc_lin[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+
+        # t = mfcc_aware_wav[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = logits[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+        # plt.legend(legends)
+       
+
+        ######################################################################
+
+        loss = F.cross_entropy(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss
+    
+    
+    
+class SER_shallow_fusion(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, n_labels=4):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.1)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=1, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=1)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttention(input_dim_mfcc, input_dim_wav,embed_dim, n_heads)
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(embed_dim, n_labels)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+       
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, embed_dim), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav.mean(1)) #(B, n_labels)
+
+
+         ########## visualize output tensors to find abnormality ###############
+        
+        # legends = 'wav_enc,mfcc_enc,wav_enc_lin,mfcc_enc_lin,mfcc_aware_wav,logits'.split(sep=',')
+        # plt.figure(figsize=(20,4))
+        # t = wav_enc[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = mfcc_enc[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = wav_enc_lin[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = mfcc_enc_lin[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+
+        # t = mfcc_aware_wav[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+
+        # t = logits[0,0,:].detach().cpu()
+        # hy,hx = torch.histogram(t, density=True)
+        # plt.plot(hx[:-1].detach(), hy.detach())
+        # plt.legend(legends)
+       
+
+        ######################################################################
+
+        loss = F.cross_entropy(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss
+    
+    
+    
+    
+    
+    #######################
+class WavLMEncoder(nn.Module):
+    '''outputs a weighted average of hidden states as audio representation'''
+    def __init__(self, config='microsoft/wavlm-base-plus', num_hidden_states=13):
+        super().__init__()
+        self.wavlm = WavLMModel.from_pretrained(config)
+        self.weights =nn.Parameter(torch.ones((num_hidden_states,1)))
+        
+
+    def forward(self, input_audio):
+        output = self.wavlm(input_audio, output_hidden_states=True).hidden_states
+        output_cat = torch.stack(output, dim=-1) #(B,T,d,num_hidden)
+        avg = (output_cat @ self.weights) / self.weights.sum(dim=0) # (B,T,d,num_hidden) @ (num_hidden, 1) = (B,T,d,1)
+        avg = avg.squeeze(dim=-1) #(B,T,d)
+        return avg
+
+
+
+class SER_WavLM(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, n_labels=4):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wavlm'
+
+        #wavlm enocding layer:
+        self.wavlm_encoder = WavLMEncoder()
+
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.1)
+
+        # wavlm linear layer:
+        self.wavlm_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=1, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=1)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttention(input_dim_mfcc, input_dim_wav,embed_dim, n_heads)
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(embed_dim, n_labels)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wavlm_encoder(x_wav)) # (B, T1, 768)
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+       
+        wav_enc_lin = self.wavlm_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, embed_dim), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav) #(B,T2, n_labels)
+        logits = logits.mean(1) # (B, n_labels)  ## try weighted average layer ## 
+        
+       
+        loss = F.cross_entropy(logits, y)
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss

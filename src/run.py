@@ -12,6 +12,15 @@ from models import *
 from prepare_dataset import prepare_dataset_csv, IEMOCAP_Dataset
 
 
+class Config:
+    def __init__(self, config_dict):
+        for (
+            k,
+            v,
+        ) in config_dict.items():
+            setattr(self, k, v)
+
+
 def extract_mfcc(wav, sr):
     """wav : (1,T)"""
     x = np.array(wav)
@@ -75,6 +84,70 @@ def collate_2(batch_sample):  # extracts mfcc"
         "batch_mfcc": mfcc,
         "batch_labels": torch.tensor(target_labels, dtype=torch.long),
     }
+    
+    
+
+def create_dataloaders(model_config:Config, dataset_config:Config, args, valid_session):
+    '''return train, validation dataloaders'''
+    train, val = prepare_dataset_csv(dataset_config, valid_session=valid_session, test_rate= 0.0)
+    train_dataset = IEMOCAP_Dataset(dataset_config, train)
+    valid_dataset = IEMOCAP_Dataset(dataset_config, val)
+
+    # HYPERPARAMETERS:
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    batch_size = args.batch_size
+    num_workers = 1
+    accum_iter = int(
+        args.accum_grad
+    )  # accumulate grads (maybe needs search for optimal value)
+    sr = int(dataset_config.sr)
+
+    print(f'SSL MODEL: {model_config.ssl_model}')  
+    if model_config.ssl_model == 'wavlm':           
+        audio_processor = Wav2Vec2FeatureExtractor.from_pretrained('microsoft/wavlm-base-plus')           
+    elif model_config.ssl_model == 'wav2vec':
+        audio_processor = create_processor('facebook/wav2vec2-base')    
+        
+           
+    def collate(batch_sample):
+        # batch_sample is dict type, we want to output [X, y]
+        batch_audio = [X['audio_input'] for X in batch_sample]
+        target_labels = [X['label'] for X in batch_sample]
+    
+        
+        batch_audio = [{"input_values": audio} for audio in batch_audio]
+        batch_audio = audio_processor.pad(
+                batch_audio,
+                padding=True,
+                return_tensors="pt",
+            ).input_values
+
+    
+        mfcc = torch.tensor(np.array([extract_mfcc(audio, sr) for audio in batch_audio]))
+
+        batch_audio = audio_processor(batch_audio, sampling_rate=16000,return_tensors='pt').input_values[0]
+    
+        return {'batch_audio': batch_audio,'batch_mfcc':mfcc,'batch_labels': torch.tensor(target_labels, dtype=torch.long)}
+
+    print("CREATING DATALOADERS...")
+    # create dataloaders
+    train_dataloader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        collate_fn=collate,
+    )
+
+    valid_dataloader = DataLoader(
+        dataset=valid_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        collate_fn=collate,
+    ) 
+   
+    return train_dataloader, valid_dataloader
 
 
 def evaluate_metrics(ypred, ytrue):
@@ -262,21 +335,13 @@ def train_run(
     }
 
 
-class Config:
-    def __init__(self, config_dict):
-        for (
-            k,
-            v,
-        ) in config_dict.items():
-            setattr(self, k, v)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config", type=str, required=True, help="configuration file path"
     )
-    parser.add_argument("--batch_size", type=int, default=4, required=False)
+    parser.add_argument("--batch_size", type=int, default=2, required=False)
     parser.add_argument("--epochs", type=int, required=True)
     parser.add_argument("--learning_rate", type=float, default=4e-5)
     parser.add_argument("--accum_grad", type=int, default=4)
@@ -286,7 +351,8 @@ if __name__ == "__main__":
     parser.add_argument("--early_stop", action="store_true")
     parser.add_argument("--cross_val", action="store_true")
     parser.add_argument("--model_name", type=str, default="")
-
+    parser.add_argument("--valid_session", type=str, default="Ses01")
+    parser.add_argument("--checkpoint", type=str, required=False, default=None)
     args = parser.parse_args()
 
     with open(args.config, "r") as file:
@@ -294,63 +360,22 @@ if __name__ == "__main__":
 
     model_config = Config(config["COSER"])
     dataset_config = Config(config["DATASET"])
-
+    model_config.lr = args.learning_rate
+    device= 'cuda' if torch.cuda.is_available() else 'cpu'
     if args.cross_val:
         cv_results = []
         print("START CROSS-VALIDATION...")
-        for i in range(5, 6):
+        model = SER3(40, 512,512,4,256)
+        for i in range(1, 6):
 
             print(f"Fold #{i}")
             print("PREPARING DATASET...")
-            train, val, test = prepare_dataset_csv(
-                dataset_config, valid_session=f"Ses0{str(i)}"
-            )
-
-            train_dataset = IEMOCAP_Dataset(dataset_config, train)
-            valid_dataset = IEMOCAP_Dataset(dataset_config, val)
-            test_dataset = IEMOCAP_Dataset(dataset_config, test)
-
-            # HYPERPARAMETERS:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            batch_size = args.batch_size
-            num_workers = 1
-            wav2vec_config = "facebook/wav2vec2-base"
-            accum_iter = (
-                args.accum_grad
-            )  # accumulate grads (maybe needs search for optimal value)
-            sr = int(dataset_config.sr)
-
-            print("CREATING DATALOADERS...")
-            audio_processor = create_processor(wav2vec_config)
-            # create dataloaders
-            train_dataloader = DataLoader(
-                dataset=train_dataset,
-                batch_size=batch_size,
-                shuffle=True,
-                num_workers=num_workers,
-                collate_fn=collate_2,
-            )
-
-            valid_dataloader = DataLoader(
-                dataset=valid_dataset,
-                batch_size=batch_size,
-                num_workers=num_workers,
-                shuffle=False,
-                collate_fn=collate_2,
-            )
-
-            test_dataloader = DataLoader(
-                dataset=test_dataset,
-                batch_size=batch_size,
-                num_workers=num_workers,
-                shuffle=False,
-                collate_fn=collate_2,
-            )
+            train_dataloader, valid_dataloader = create_dataloaders(model_config, dataset_config, args, valid_session=f"Ses0{i}")
 
             print("INITALIZING THE MODEL...")
             gc.collect()
             torch.cuda.empty_cache()
-            model = SER2(40, 512, 512, 4, 256)
+            model.__init__(40, 512, 512, 4, 256)
 
             es = None
             if args.early_stop:
@@ -363,7 +388,7 @@ if __name__ == "__main__":
                 train_dl=train_dataloader,
                 valid_dl=valid_dataloader,
                 batch_size=args.batch_size,
-                accum_iter=accum_iter,
+                accum_iter=args.accum_grad,
                 early_stopping=es,
             )
             cv_results.append(results)
@@ -378,59 +403,22 @@ if __name__ == "__main__":
             f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt"
         )
     else:
-        print("PREPARING DATASET...")
-        train, val, test = prepare_dataset_csv(dataset_config)
-
-        train_dataset = IEMOCAP_Dataset(dataset_config, train)
-        valid_dataset = IEMOCAP_Dataset(dataset_config, val)
-        test_dataset = IEMOCAP_Dataset(dataset_config, test)
-
-        # HYPERPARAMETERS:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        batch_size = args.batch_size
-        num_workers = 1
-        wav2vec_config = "facebook/wav2vec2-base"
-        accum_iter = (
-            args.accum_grad
-        )  # accumulate grads (maybe needs search for optimal value)
-        sr = int(dataset_config.sr)
-
-        print("CREATING DATALOADERS...")
-        audio_processor = create_processor(wav2vec_config)
-        # create dataloaders
-        train_dataloader = DataLoader(
-            dataset=train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=num_workers,
-            collate_fn=collate_2,
-        )
-
-        valid_dataloader = DataLoader(
-            dataset=valid_dataset,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            shuffle=False,
-            collate_fn=collate_2,
-        )
-
-        test_dataloader = DataLoader(
-            dataset=test_dataset,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            shuffle=False,
-            collate_fn=collate_2,
-        )
-
+        train_dataloader, valid_dataloader = create_dataloaders(model_config, dataset_config, args, valid_session=args.valid_session)
         print("INITALIZING THE MODEL...")
         gc.collect()
         torch.cuda.empty_cache()
-        model = SER2(40, 512, 512, 4, 256)
+        # model = SER3(40, 512, 512, 4, 256)
+        model = SER_WavLM(40, 512,512,4, 256)
+        if args.checkpoint:
+            print(f'Model is loaded from checkpoint {args.checkpoint}')
+            model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
+        #model.load_state_dict(torch.load('checkpoints/SER_WavLM_SER_WavLM.pt')['model_state_dict'])
 
         es = None
         if args.early_stop:
             es = EarlyStopping(patience=5, min_delta=1e-3)
             print("Early Stopping is eactivated")
+        
         results = train_run(
             model=model,
             config=model_config,
@@ -438,7 +426,7 @@ if __name__ == "__main__":
             train_dl=train_dataloader,
             valid_dl=valid_dataloader,
             batch_size=args.batch_size,
-            accum_iter=accum_iter,
+            accum_iter=int(args.accum_grad),
             early_stopping=es,
         )
         torch.save(results, f"{args.save_path}/{model.__class__.__name__}_{args.model_name}.pt")
