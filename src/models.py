@@ -149,7 +149,7 @@ class TransformerEncoder(nn.Module):
             x = layer(x)
             
         out = x
-        return x
+        return out
 
 
 
@@ -669,18 +669,18 @@ class SER_shallow_fusion(nn.Module):
     #######################
 class WavLMEncoder(nn.Module):
     '''outputs a weighted average of hidden states as audio representation'''
-    def __init__(self, config='microsoft/wavlm-base-plus', num_hidden_states=13):
+    def __init__(self, config='microsoft/wavlm-base-plus', num_hidden_states=12):
         super().__init__()
         self.wavlm = WavLMModel.from_pretrained(config)
         self.weights =nn.Parameter(torch.ones((num_hidden_states,1)))
         
 
     def forward(self, input_audio):
-        output = self.wavlm(input_audio, output_hidden_states=True).hidden_states
-        output_cat = torch.stack(output, dim=-1) #(B,T,d,num_hidden)
-        avg = (output_cat @ self.weights) / self.weights.sum(dim=0) # (B,T,d,num_hidden) @ (num_hidden, 1) = (B,T,d,1)
-        avg = avg.squeeze(dim=-1) #(B,T,d)
-        return avg
+        output = self.wavlm(input_audio, output_hidden_states=True).last_hidden_state #(B,T, 768)
+        # output_cat = torch.stack(output, dim=-1) #(B,T,d,num_hidden)
+        # avg = (output_cat @ self.weights) / self.weights.sum(dim=0) # (B,T,d,num_hidden) @ (num_hidden, 1) = (B,T,d,1)
+        # avg = avg.squeeze(dim=-1) #(B,T,d)
+        return output
 
 
 
@@ -733,3 +733,77 @@ class SER_WavLM(nn.Module):
         loss = F.cross_entropy(logits, y)
         #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
         return logits, loss
+    
+    
+    
+class Conv(nn.Module):
+    def __init__(self, n_mfcc=40, dim=64):
+        super().__init__()
+        self.layers = nn.Sequential(nn.Conv1d(n_mfcc, dim, kernel_size=(3)),
+        nn.BatchNorm1d(dim),
+        nn.LeakyReLU(),
+        nn.MaxPool1d(kernel_size=(2), stride=(2))
+                                   )
+
+    def forward(self, x_input):
+            '''#(B, T, n_mfcc)'''
+            x= x_input.permute(0,2,1) # (B, n_mfcc, T)
+            out = self.layers(x) # (B, dim ,T')
+            out = out.permute(0,2,1) # (B, T', dim)
+            return out
+
+
+
+    
+class SER_CONV(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, n_labels=4):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+        self.conv_dim = 64
+
+        #mfcc_temporal_convolution:
+        self.mfcc_conv = nn.Sequential(Conv(n_mfcc, self.conv_dim), Conv(self.conv_dim, self.conv_dim))
+
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(self.conv_dim, input_dim_mfcc, 0, dropout=0.3)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=2, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=4, dropout=0.3)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttention(input_dim_mfcc, input_dim_wav,embed_dim, n_heads)
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head=  nn.Linear(embed_dim, n_labels)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = self.wav2vec_encoder(x_wav) # (B, T1, 768)
+        mfcc_conv = self.mfcc_conv(x_mfcc) #(B, T2, conv_dim)
+        mfcc_enc = self.mfcc_encoder(mfcc_conv) # (B, T2, input_dim_mfcc)
+
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, embed_dim), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+        logits = logits.mean(1) # (B, n_labels)
+        loss = F.cross_entropy(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss
+        

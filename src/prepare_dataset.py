@@ -81,8 +81,8 @@ def prepare_dataset_csv(config, valid_session='Ses01', test_rate=0.1):\
     torch.cuda.manual_seed_all(42)
     test_size = int(test_rate * len(data))
     if test_size > 0:
-        idx = [] if test_size > 0 else torch.multinomial(torch.ones((len(data))), num_samples=test_size, replacement=False) # sample from uniform distribution 
-        test_data_csv = data.iloc[idx].copy()
+        #idx = [] if test_size > 0 else torch.multinomial(torch.ones((len(data))), num_samples=test_size, replacement=False) # sample from uniform distribution 
+        test_data_csv = data[data['FileName'].str.match(f'{valid_session}M')]
         valid_data_csv = data[data['FileName'].str.match(valid_session) & ~data.index.isin(test_data_csv.index)]
         train_data_csv = data[~data.index.isin(valid_data_csv.index) & ~data.index.isin(test_data_csv.index)]
         

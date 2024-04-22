@@ -84,14 +84,18 @@ def collate_2(batch_sample):  # extracts mfcc"
         "batch_mfcc": mfcc,
         "batch_labels": torch.tensor(target_labels, dtype=torch.long),
     }
-    
-    
 
-def create_dataloaders(model_config:Config, dataset_config:Config, args, valid_session):
-    '''return train, validation dataloaders'''
-    train, val = prepare_dataset_csv(dataset_config, valid_session=valid_session, test_rate= 0.0)
+
+def create_dataloaders(
+    model_config: Config, dataset_config: Config, args, valid_session
+):
+    """return train, validation dataloaders"""
+    train, val, test = prepare_dataset_csv(
+        dataset_config, valid_session=valid_session, test_rate=0.1
+    )
     train_dataset = IEMOCAP_Dataset(dataset_config, train)
     valid_dataset = IEMOCAP_Dataset(dataset_config, val)
+    test_dataset = IEMOCAP_Dataset(dataset_config, test)
 
     # HYPERPARAMETERS:
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -102,32 +106,39 @@ def create_dataloaders(model_config:Config, dataset_config:Config, args, valid_s
     )  # accumulate grads (maybe needs search for optimal value)
     sr = int(dataset_config.sr)
 
-    print(f'SSL MODEL: {model_config.ssl_model}')  
-    if model_config.ssl_model == 'wavlm':           
-        audio_processor = Wav2Vec2FeatureExtractor.from_pretrained('microsoft/wavlm-base-plus')           
-    elif model_config.ssl_model == 'wav2vec':
-        audio_processor = create_processor('facebook/wav2vec2-base')    
-        
-           
+    print(f"SSL MODEL: {model_config.ssl_model}")
+    if model_config.ssl_model == "wavlm":
+        audio_processor = Wav2Vec2FeatureExtractor.from_pretrained(
+            "microsoft/wavlm-base-plus"
+        )
+    elif model_config.ssl_model == "wav2vec":
+        audio_processor = create_processor("facebook/wav2vec2-base")
+
     def collate(batch_sample):
         # batch_sample is dict type, we want to output [X, y]
-        batch_audio = [X['audio_input'] for X in batch_sample]
-        target_labels = [X['label'] for X in batch_sample]
-    
-        
+        batch_audio = [X["audio_input"] for X in batch_sample]
+        target_labels = [X["label"] for X in batch_sample]
+
         batch_audio = [{"input_values": audio} for audio in batch_audio]
         batch_audio = audio_processor.pad(
-                batch_audio,
-                padding=True,
-                return_tensors="pt",
-            ).input_values
+            batch_audio,
+            padding=True,
+            return_tensors="pt",
+        ).input_values
 
-    
-        mfcc = torch.tensor(np.array([extract_mfcc(audio, sr) for audio in batch_audio]))
+        mfcc = torch.tensor(
+            np.array([extract_mfcc(audio, sr) for audio in batch_audio])
+        )
 
-        batch_audio = audio_processor(batch_audio, sampling_rate=16000,return_tensors='pt').input_values[0]
-    
-        return {'batch_audio': batch_audio,'batch_mfcc':mfcc,'batch_labels': torch.tensor(target_labels, dtype=torch.long)}
+        batch_audio = audio_processor(
+            batch_audio, sampling_rate=16000, return_tensors="pt"
+        ).input_values[0]
+
+        return {
+            "batch_audio": batch_audio,
+            "batch_mfcc": mfcc,
+            "batch_labels": torch.tensor(target_labels, dtype=torch.long),
+        }
 
     print("CREATING DATALOADERS...")
     # create dataloaders
@@ -145,9 +156,17 @@ def create_dataloaders(model_config:Config, dataset_config:Config, args, valid_s
         num_workers=num_workers,
         shuffle=False,
         collate_fn=collate,
-    ) 
-   
-    return train_dataloader, valid_dataloader
+    )
+    
+    test_dataloader = DataLoader(
+        dataset=test_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        collate_fn=collate,
+    )
+
+    return train_dataloader, valid_dataloader, test_dataloader
 
 
 def evaluate_metrics(ypred, ytrue):
@@ -335,6 +354,95 @@ def train_run(
     }
 
 
+def cross_validation_5_folds(model, model_config:Config, dataset_config:Config, args):
+    cv_results = []
+    print("START CROSS-VALIDATION...")
+    model = SER3(40, 512, 512, 4, 256)
+    for i in range(1, 6):
+
+        print(f"Fold #{i}")
+        print("PREPARING DATASET...")
+        train_dataloader, valid_dataloader = create_dataloaders(
+            model_config, dataset_config, args, valid_session=f"Ses0{i}"
+        )
+
+        print("INITALIZING THE MODEL...")
+        gc.collect()
+        torch.cuda.empty_cache()
+        model.__init__(40, 512, 512, 4, 256)
+
+        es = None
+        if args.early_stop:
+            es = EarlyStopping(patience=5, min_delta=1e-3)
+            print("Early Stopping is eactivated")
+        results = train_run(
+            model=model,
+            config=model_config,
+            epochs=args.epochs,
+            train_dl=train_dataloader,
+            valid_dl=valid_dataloader,
+            batch_size=args.batch_size,
+            accum_iter=args.accum_grad,
+            early_stopping=es,
+        )
+        cv_results.append(results)
+        torch.save(
+            results,
+            f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
+        )
+        print("*" * 50)
+    torch.save(
+        cv_results,
+        f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
+    )
+    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt")
+    
+    
+    
+def cross_validation_10_folds(model, model_config:Config, dataset_config:Config, args):
+    cv_results = []
+    print("START CROSS-VALIDATION...")
+    model = SER3(40, 512, 512, 4, 256)
+    for i in range(1, 6):
+        
+        print(f"Fold #{i}")
+        print("PREPARING DATASET...")
+        train_dataloader, valid_dataloader = create_dataloaders(
+            model_config, dataset_config, args, valid_session=f"Ses0{i}"
+        )
+
+        print("INITALIZING THE MODEL...")
+        gc.collect()
+        torch.cuda.empty_cache()
+        model.__init__(40, 512, 512, 4, 256)
+
+        es = None
+        if args.early_stop:
+            es = EarlyStopping(patience=5, min_delta=1e-3)
+            print("Early Stopping is eactivated")
+        results = train_run(
+            model=model,
+            config=model_config,
+            epochs=args.epochs,
+            train_dl=train_dataloader,
+            valid_dl=valid_dataloader,
+            batch_size=args.batch_size,
+            accum_iter=args.accum_grad,
+            early_stopping=es,
+        )
+        cv_results.append(results)
+        torch.save(
+            results,
+            f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
+        )
+        print("*" * 50)
+    torch.save(
+        cv_results,
+        f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
+    )
+    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt")
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -353,6 +461,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="")
     parser.add_argument("--valid_session", type=str, default="Ses01")
     parser.add_argument("--checkpoint", type=str, required=False, default=None)
+
     args = parser.parse_args()
 
     with open(args.config, "r") as file:
@@ -361,16 +470,19 @@ if __name__ == "__main__":
     model_config = Config(config["COSER"])
     dataset_config = Config(config["DATASET"])
     model_config.lr = args.learning_rate
-    device= 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    *_, test_dataloader = prepare_dataset_csv(dataset_config, test_rate=0.1)
     if args.cross_val:
         cv_results = []
         print("START CROSS-VALIDATION...")
-        model = SER3(40, 512,512,4,256)
+        model = SER3(40, 512, 512, 4, 256)
         for i in range(1, 6):
 
             print(f"Fold #{i}")
             print("PREPARING DATASET...")
-            train_dataloader, valid_dataloader = create_dataloaders(model_config, dataset_config, args, valid_session=f"Ses0{i}")
+            train_dataloader, valid_dataloader = create_dataloaders(
+                model_config, dataset_config, args, valid_session=f"Ses0{i}"
+            )
 
             print("INITALIZING THE MODEL...")
             gc.collect()
@@ -393,32 +505,37 @@ if __name__ == "__main__":
             )
             cv_results.append(results)
             torch.save(
-                results, f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt"
+                results,
+                f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
             )
             print("*" * 50)
         torch.save(
-            cv_results, f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt"
+            cv_results,
+            f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
         )
         print(
             f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt"
         )
     else:
-        train_dataloader, valid_dataloader = create_dataloaders(model_config, dataset_config, args, valid_session=args.valid_session)
+        train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
+            model_config, dataset_config, args, valid_session=args.valid_session
+        )
         print("INITALIZING THE MODEL...")
         gc.collect()
         torch.cuda.empty_cache()
         # model = SER3(40, 512, 512, 4, 256)
-        model = SER_WavLM(40, 512,512,4, 256)
+        #model = SER_WavLM(40, 512, 512, 4, 256)
+        model = SER_CONV(40, 512,512,1,256,4)
         if args.checkpoint:
-            print(f'Model is loaded from checkpoint {args.checkpoint}')
-            model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
-        #model.load_state_dict(torch.load('checkpoints/SER_WavLM_SER_WavLM.pt')['model_state_dict'])
+            print(f"Model is loaded from checkpoint {args.checkpoint}")
+            model.load_state_dict(torch.load(args.checkpoint)["model_state_dict"])
+        # model.load_state_dict(torch.load('checkpoints/SER_WavLM_SER_WavLM.pt')['model_state_dict'])
 
         es = None
         if args.early_stop:
             es = EarlyStopping(patience=5, min_delta=1e-3)
             print("Early Stopping is eactivated")
-        
+
         results = train_run(
             model=model,
             config=model_config,
@@ -429,5 +546,7 @@ if __name__ == "__main__":
             accum_iter=int(args.accum_grad),
             early_stopping=es,
         )
-        torch.save(results, f"{args.save_path}/{model.__class__.__name__}_{args.model_name}.pt")
+        torch.save(
+            results, f"{args.save_path}/{model.__class__.__name__}_{args.model_name}.pt"
+        )
         print("*" * 50)
