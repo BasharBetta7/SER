@@ -225,7 +225,7 @@ def train_run(
     optimizer = torch.optim.AdamW(params, lr=float(config.lr))
     optimizer.zero_grad(set_to_none=True)
     scheduler = ReduceLROnPlateau(
-        optimizer, "min", patience=5, min_lr=1e-8, verbose=True
+        optimizer, "max", patience=5, min_lr=1e-8, verbose=True
     )
     logs_freq = 50
 
@@ -311,7 +311,7 @@ def train_run(
                 .numpy()
             )
             elapsed_time = time.time() - start_time
-            scheduler.step(val_loss)
+            scheduler.step(wa)
             print(f"Current learning rate: {scheduler.get_last_lr()}")
             print(f"epoch {step + 1} validation WA= {wa} | UA={ua} | loss={val_loss}")
             stats = {
@@ -404,43 +404,43 @@ def cross_validation_10_folds(model, model_config:Config, dataset_config:Config,
     print("START CROSS-VALIDATION...")
     model = SER3(40, 512, 512, 4, 256)
     for i in range(1, 6):
-        
-        print(f"Fold #{i}")
-        print("PREPARING DATASET...")
-        train_dataloader, valid_dataloader = create_dataloaders(
-            model_config, dataset_config, args, valid_session=f"Ses0{i}"
-        )
+        for j in ['M','F']:
+            print(f"Fold #{i}{j}")
+            print("PREPARING DATASET...")
+            train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
+                model_config, dataset_config, args, valid_session=f"Ses0{i}{j}"
+            )
 
-        print("INITALIZING THE MODEL...")
-        gc.collect()
-        torch.cuda.empty_cache()
-        model.__init__(40, 512, 512, 4, 256)
+            print("INITALIZING THE MODEL...")
+            gc.collect()
+            torch.cuda.empty_cache()
+            model.__init__(40, 512, 512, 4, 256)
 
-        es = None
-        if args.early_stop:
-            es = EarlyStopping(patience=5, min_delta=1e-3)
-            print("Early Stopping is eactivated")
-        results = train_run(
-            model=model,
-            config=model_config,
-            epochs=args.epochs,
-            train_dl=train_dataloader,
-            valid_dl=valid_dataloader,
-            batch_size=args.batch_size,
-            accum_iter=args.accum_grad,
-            early_stopping=es,
-        )
-        cv_results.append(results)
-        torch.save(
-            results,
-            f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
-        )
-        print("*" * 50)
+            es = None
+            if args.early_stop:
+                es = EarlyStopping(patience=5, min_delta=1e-3)
+                print("Early Stopping is eactivated")
+            results = train_run(
+                model=model,
+                config=model_config,
+                epochs=args.epochs,
+                train_dl=train_dataloader,
+                valid_dl=valid_dataloader,
+                batch_size=args.batch_size,
+                accum_iter=args.accum_grad,
+                early_stopping=es,
+            )
+            cv_results.append(results)
+            torch.save(
+                results,
+                f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}{j}.pt",
+            )
+            print("*" * 50)
     torch.save(
         cv_results,
         f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
     )
-    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt")
+    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_10_cv_results.pt")
 
 
 

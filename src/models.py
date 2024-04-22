@@ -90,7 +90,7 @@ class EncoderBlock(nn.Module):
         self.linear_layers = nn.Sequential(
             nn.Linear(input_dim, ff_embed_dim),
             nn.Dropout(dropout),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
             nn.Linear(ff_embed_dim, input_dim)
         )
             
@@ -741,7 +741,7 @@ class Conv(nn.Module):
         super().__init__()
         self.layers = nn.Sequential(nn.Conv1d(n_mfcc, dim, kernel_size=(3)),
         nn.BatchNorm1d(dim),
-        nn.LeakyReLU(),
+        nn.GELU(),
         nn.MaxPool1d(kernel_size=(2), stride=(2))
                                    )
 
@@ -771,11 +771,11 @@ class SER_CONV(nn.Module):
         self.mfcc_encoder = BiLSTM(self.conv_dim, input_dim_mfcc, 0, dropout=0.3)
 
         # wav2vec linear layer:
-        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+        self.wav2vec_ff = nn.Sequential(nn.Linear(768, input_dim_wav), nn.GELU())
 
         # mfcc linear layer:
-        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
-        self.mfcc_att = TransformerEncoder(num_encoders=2, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=4, dropout=0.3)
+        self.mfcc_ff = nn.Sequential(nn.Linear(2 * input_dim_mfcc, input_dim_mfcc), nn.GELU())
+        self.mfcc_att = TransformerEncoder(num_encoders=2, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=8, dropout=0.3)
         # add self attention for mfcc later 
         # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
 
@@ -784,7 +784,7 @@ class SER_CONV(nn.Module):
         # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
         
         # classification head 
-        self.cls_head=  nn.Linear(embed_dim, n_labels)
+        self.cls_head = nn.Linear(embed_dim, n_labels)
 
     def forward(self, x_wav, x_mfcc, y):
         '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
