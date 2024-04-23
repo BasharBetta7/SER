@@ -183,7 +183,7 @@ def evaluate_metrics(ypred, ytrue):
     return wa.item(), ua.item()
 
 
-class EarlyStopping:
+class  EarlyStopping:
     def __init__(self, patience=5, min_delta=0.0, type='min'):
         self.patience = patience
         self.min_delta = min_delta
@@ -203,6 +203,36 @@ class EarlyStopping:
                 return True
         return False
 
+@torch.no_grad()
+def test_split(split, config):
+    loader = {
+        'train': config.train_dataloader,
+         'val' : config.valid_dataloader,
+         'test' : config.test_dataloader
+     }[split]
+
+
+    lossi = []
+    ytrue = []
+    ypred = []
+    model = config.model
+    model.to(device)
+    
+    for batch_dict in tqdm(loader, total=len(loader)):
+        xtr_1 = batch_dict['batch_audio']
+        xtr_2 = batch_dict['batch_mfcc']
+        ytr = batch_dict['batch_labels']
+       
+        
+        # forward pass:
+        logits, loss =  model(xtr_1.to(device), xtr_2.to(device),  ytr.to(device))
+        ypred.extend(logits.detach().cpu().argmax(1))
+        ytrue.extend(ytr.detach().cpu())
+        lossi.append(loss.detach().cpu())
+        
+    wa,ua = evaluate_metrics(ypred, ytrue)
+    return split, wa, ua, lossi, ypred, ytrue
+
 
 def train_run(
     model,
@@ -212,7 +242,7 @@ def train_run(
     valid_dl,
     batch_size,
     accum_iter,
-    early_stopping=None,
+    early_stopping:EarlyStopping=None,
 ):
     model.to(device)
     params = [p for p in model.parameters() if p.requires_grad]
@@ -404,40 +434,40 @@ def cross_validation_5_folds(model,model_args:tuple, model_config:Config, datase
 def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Config, dataset_config:Config, args):
     cv_results = []
     print("START CROSS-VALIDATION...")
+    
     model.__init__(*model_args)
-    for i in range(1, 6):
-        for j in ['M','F']:
-            print(f"Fold #{i}{j}")
-            print("PREPARING DATASET...")
-            train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
-                model_config, dataset_config, args, valid_session=f"Ses0{i}{j}"
-            )
+    for i in ['1F','4F','5M', '5F']:
+        print(f"Fold #{i}")
+        print("PREPARING DATASET...")
+        train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
+            model_config, dataset_config, args, valid_session=f"Ses0{i}"
+        )
 
-            print("INITALIZING THE MODEL...")
-            gc.collect()
-            torch.cuda.empty_cache()
-            model.__init__(*model_args)
+        print("INITALIZING THE MODEL...")
+        gc.collect()
+        torch.cuda.empty_cache()
+        model.__init__(*model_args)
 
-            es = None
-            if args.early_stop:
-                es = EarlyStopping(patience=5, min_delta=1e-3)
-                print("Early Stopping is eactivated")
-            results = train_run(
-                model=model,
-                config=model_config,
-                epochs=args.epochs,
-                train_dl=train_dataloader,
-                valid_dl=valid_dataloader,
-                batch_size=args.batch_size,
-                accum_iter=args.accum_grad,
-                early_stopping=es,
-            )
-            cv_results.append(results)
-            torch.save(
-                results,
-                f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}{j}.pt",
-            )
-            print("*" * 50)
+        es = None
+        if args.early_stop:
+            es = EarlyStopping(patience=5, min_delta=1e-3, type='max')
+            print("Early Stopping is eactivated")
+        results = train_run(
+            model=model,
+            config=model_config,
+            epochs=args.epochs,
+            train_dl=train_dataloader,
+            valid_dl=valid_dataloader,
+            batch_size=args.batch_size,
+            accum_iter=args.accum_grad,
+            early_stopping=es,
+        )
+        cv_results.append(results)
+        torch.save(
+            results,
+            f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
+        )
+        print("*" * 50)
     torch.save(
         cv_results,
         f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
@@ -447,12 +477,12 @@ def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Con
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog='SER_Co_attention', description='train Speech Emotion Recognition Model on IEMOCAP dataset')
     parser.add_argument(
-        "--config", type=str, required=True, help="configuration file path"
+        "--config", type=str, default='./configs/config.yaml', help="configuration .yaml file path"
     )
     parser.add_argument("--batch_size", type=int, default=2, required=False)
-    parser.add_argument("--epochs", type=int, required=True)
+    parser.add_argument("--epochs", type=int,default=20)
     parser.add_argument("--learning_rate", type=float, default=4e-5)
     parser.add_argument("--accum_grad", type=int, default=4)
     parser.add_argument(
@@ -463,12 +493,14 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="")
     parser.add_argument("--valid_session", type=str, default="Ses01")
     parser.add_argument("--checkpoint", type=str, required=False, default=None)
-    parser.add_argument("--num_folds", type=int, default=10)
+    parser.add_argument("--num_folds", type=int, default=10, choices=[5,10], help='choose between 10-fold and 5-fold cross validation')
     args = parser.parse_args()
 
     with open(args.config, "r") as file:
         config = yaml.safe_load(file)
-
+        
+    torch.manual_seed(42)
+    torch.cuda.manual_seed_all(42)
     model_config = Config(config["COSER"])
     dataset_config = Config(config["DATASET"])
     model_config.lr = args.learning_rate
