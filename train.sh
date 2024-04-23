@@ -1,0 +1,1 @@
+python ./src/run.py --batch_size 2 --learning_rate 4e-5 --accum_grad 4 --cross_val --early_stop --

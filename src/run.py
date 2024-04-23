@@ -184,13 +184,16 @@ def evaluate_metrics(ypred, ytrue):
 
 
 class EarlyStopping:
-    def __init__(self, patience=5, min_delta=0.0):
+    def __init__(self, patience=5, min_delta=0.0, type='min'):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
-        self.min_loss = float("inf")
+        self.min_loss = float("inf") 
+        self.type = type
 
     def early_stop(self, loss):
+        if type == 'max':
+            loss *= -1
         if loss < self.min_loss:
             self.min_loss = loss
             self.counter = 0
@@ -334,7 +337,7 @@ def train_run(
                 wa_best = wa
                 chkpt = model.state_dict().copy()
             if early_stopping is not None:
-                if early_stopping.early_stop(val_loss):
+                if early_stopping.early_stop(wa):
                     print("Eearly Stopping!")
                     break
     model.to("cpu")
@@ -354,10 +357,10 @@ def train_run(
     }
 
 
-def cross_validation_5_folds(model, model_config:Config, dataset_config:Config, args):
+def cross_validation_5_folds(model,model_args:tuple, model_config:Config, dataset_config:Config, args):
     cv_results = []
     print("START CROSS-VALIDATION...")
-    model = SER3(40, 512, 512, 4, 256)
+    model.__init__(*model_args)
     for i in range(1, 6):
 
         print(f"Fold #{i}")
@@ -369,7 +372,7 @@ def cross_validation_5_folds(model, model_config:Config, dataset_config:Config, 
         print("INITALIZING THE MODEL...")
         gc.collect()
         torch.cuda.empty_cache()
-        model.__init__(40, 512, 512, 4, 256)
+        model.__init__(*model_args)
 
         es = None
         if args.early_stop:
@@ -398,11 +401,10 @@ def cross_validation_5_folds(model, model_config:Config, dataset_config:Config, 
     print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt")
     
     
-    
-def cross_validation_10_folds(model, model_config:Config, dataset_config:Config, args):
+def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Config, dataset_config:Config, args):
     cv_results = []
     print("START CROSS-VALIDATION...")
-    model = SER3(40, 512, 512, 4, 256)
+    model.__init__(*model_args)
     for i in range(1, 6):
         for j in ['M','F']:
             print(f"Fold #{i}{j}")
@@ -414,7 +416,7 @@ def cross_validation_10_folds(model, model_config:Config, dataset_config:Config,
             print("INITALIZING THE MODEL...")
             gc.collect()
             torch.cuda.empty_cache()
-            model.__init__(40, 512, 512, 4, 256)
+            model.__init__(*model_args)
 
             es = None
             if args.early_stop:
@@ -461,7 +463,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="")
     parser.add_argument("--valid_session", type=str, default="Ses01")
     parser.add_argument("--checkpoint", type=str, required=False, default=None)
-
+    parser.add_argument("--num_folds", type=int, default=10)
     args = parser.parse_args()
 
     with open(args.config, "r") as file:
@@ -472,50 +474,12 @@ if __name__ == "__main__":
     model_config.lr = args.learning_rate
     device = "cuda" if torch.cuda.is_available() else "cpu"
     *_, test_dataloader = prepare_dataset_csv(dataset_config, test_rate=0.1)
+    model = SER2(40, 512, 512, 4, 256)
     if args.cross_val:
-        cv_results = []
-        print("START CROSS-VALIDATION...")
-        model = SER3(40, 512, 512, 4, 256)
-        for i in range(1, 6):
-
-            print(f"Fold #{i}")
-            print("PREPARING DATASET...")
-            train_dataloader, valid_dataloader = create_dataloaders(
-                model_config, dataset_config, args, valid_session=f"Ses0{i}"
-            )
-
-            print("INITALIZING THE MODEL...")
-            gc.collect()
-            torch.cuda.empty_cache()
-            model.__init__(40, 512, 512, 4, 256)
-
-            es = None
-            if args.early_stop:
-                es = EarlyStopping(patience=5, min_delta=1e-3)
-                print("Early Stopping is eactivated")
-            results = train_run(
-                model=model,
-                config=model_config,
-                epochs=args.epochs,
-                train_dl=train_dataloader,
-                valid_dl=valid_dataloader,
-                batch_size=args.batch_size,
-                accum_iter=args.accum_grad,
-                early_stopping=es,
-            )
-            cv_results.append(results)
-            torch.save(
-                results,
-                f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
-            )
-            print("*" * 50)
-        torch.save(
-            cv_results,
-            f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
-        )
-        print(
-            f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt"
-        )
+        if args.num_folds == 10:
+            cross_validation_10_folds(model,(40,512,512,4,256), model_config, dataset_config, args)
+        elif args.num_folds == 5:
+            cross_validation_5_folds(model,(40,512,512,4,256), model_config, dataset_config, args)
     else:
         train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
             model_config, dataset_config, args, valid_session=args.valid_session
@@ -533,7 +497,7 @@ if __name__ == "__main__":
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=5, min_delta=1e-3)
+            es = EarlyStopping(patience=5, min_delta=1e-3, type='max')
             print("Early Stopping is eactivated")
 
         results = train_run(
