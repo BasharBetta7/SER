@@ -184,7 +184,7 @@ def evaluate_metrics(ypred, ytrue):
 
 
 class  EarlyStopping:
-    def __init__(self, patience=5, min_delta=0.0, type='min'):
+    def __init__(self, patience=7, min_delta=0.0, type='min'):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
@@ -202,36 +202,6 @@ class  EarlyStopping:
             if self.counter >= self.patience:
                 return True
         return False
-
-@torch.no_grad()
-def test_split(split, config):
-    loader = {
-        'train': config.train_dataloader,
-         'val' : config.valid_dataloader,
-         'test' : config.test_dataloader
-     }[split]
-
-
-    lossi = []
-    ytrue = []
-    ypred = []
-    model = config.model
-    model.to(device)
-    
-    for batch_dict in tqdm(loader, total=len(loader)):
-        xtr_1 = batch_dict['batch_audio']
-        xtr_2 = batch_dict['batch_mfcc']
-        ytr = batch_dict['batch_labels']
-       
-        
-        # forward pass:
-        logits, loss =  model(xtr_1.to(device), xtr_2.to(device),  ytr.to(device))
-        ypred.extend(logits.detach().cpu().argmax(1))
-        ytrue.extend(ytr.detach().cpu())
-        lossi.append(loss.detach().cpu())
-        
-    wa,ua = evaluate_metrics(ypred, ytrue)
-    return split, wa, ua, lossi, ypred, ytrue
 
 
 def train_run(
@@ -406,7 +376,7 @@ def cross_validation_5_folds(model,model_args:tuple, model_config:Config, datase
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=5, min_delta=1e-3)
+            es = EarlyStopping(patience=7, min_delta=1e-3)
             print("Early Stopping is eactivated")
         results = train_run(
             model=model,
@@ -436,7 +406,7 @@ def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Con
     print("START CROSS-VALIDATION...")
     
     model.__init__(*model_args)
-    for i in ['1F','4F','5M', '5F']:
+    for i in '1F,2M,2F,3M,3F,4M,4F,5M,5F'.split(sep=','):
         print(f"Fold #{i}")
         print("PREPARING DATASET...")
         train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
@@ -450,7 +420,7 @@ def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Con
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=5, min_delta=1e-3, type='max')
+            es = EarlyStopping(patience=7, min_delta=1e-3, type='max')
             print("Early Stopping is eactivated")
         results = train_run(
             model=model,
@@ -529,7 +499,7 @@ if __name__ == "__main__":
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=5, min_delta=1e-3, type='max')
+            es = EarlyStopping(patience=7, min_delta=1e-3, type='max')
             print("Early Stopping is eactivated")
 
         results = train_run(
