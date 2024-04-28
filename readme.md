@@ -10,3 +10,12 @@ you need to install audio files from IEMOCAP website [https://sail.usc.edu/iemoc
 to train the model with the same hyperparameters as the paper, simply run:
 > sh train.sh 
 
+results of cross validation will be saved as .pt files in ./checkpoints/CA_SER_fold_{fold name}.
+
+you can view hyperparameters by running:
+ > python ./src/run.py --help
+
+# evaluate the model:
+if you have a pre-trained model checkpoint, you can load its parameters and test it on the test set:
+> 
+

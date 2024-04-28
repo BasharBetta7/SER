@@ -1,2 +1,2 @@
 #!/bin/sh
-python ./src/run.py --config ./configs/config.yaml --batch_size 2 --epochs 20 --learning_rate 4e-5 --accum_grad 4 --cross_val --early_stop --num_folds 5
+python src/run.py --config configs/config.yaml --learning_rate 4e-5 --valid_session Ses01 --epochs 20 --model_name CA_SER --batch_size 2 --accum_grad 4 --cross_val --early_stop --num_folds 10

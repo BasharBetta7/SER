@@ -192,7 +192,7 @@ class  EarlyStopping:
         self.type = type
 
     def early_stop(self, loss):
-        if type == 'max':
+        if self.type == 'max':
             loss *= -1
         if loss < self.min_loss:
             self.min_loss = loss
@@ -365,7 +365,7 @@ def cross_validation_5_folds(model,model_args:tuple, model_config:Config, datase
 
         print(f"Fold #{i}")
         print("PREPARING DATASET...")
-        train_dataloader, valid_dataloader = create_dataloaders(
+        train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
             model_config, dataset_config, args, valid_session=f"Ses0{i}"
         )
 
@@ -376,8 +376,8 @@ def cross_validation_5_folds(model,model_args:tuple, model_config:Config, datase
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=7, min_delta=1e-3)
-            print("Early Stopping is eactivated")
+            es = EarlyStopping(patience=7, min_delta=0.0, type='max')
+            print("Early Stopping is activated")
         results = train_run(
             model=model,
             config=model_config,
@@ -393,12 +393,12 @@ def cross_validation_5_folds(model,model_args:tuple, model_config:Config, datase
             results,
             f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
         )
-        print("*" * 50)
+        print(f'stats of the fold are saved in P{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt')
     torch.save(
         cv_results,
-        f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
+        f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_5.pt",
     )
-    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt")
+    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_5.pt")
     
     
 def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Config, dataset_config:Config, args):
@@ -421,7 +421,7 @@ def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Con
         es = None
         if args.early_stop:
             es = EarlyStopping(patience=7, min_delta=1e-3, type='max')
-            print("Early Stopping is eactivated")
+            print("Early Stopping is activated")
         results = train_run(
             model=model,
             config=model_config,
@@ -437,12 +437,12 @@ def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Con
             results,
             f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
         )
-        print("*" * 50)
+        print(f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt")
     torch.save(
         cv_results,
-        f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results.pt",
+        f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_10.pt",
     )
-    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_10_cv_results.pt")
+    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_10.pt")
 
 
 
@@ -476,7 +476,7 @@ if __name__ == "__main__":
     model_config.lr = args.learning_rate
     device = "cuda" if torch.cuda.is_available() else "cpu"
     *_, test_dataloader = prepare_dataset_csv(dataset_config, test_rate=0.1)
-    model = SER2(40, 512, 512, 4, 256)
+    model = SER2_shallow(40, 512, 512,4, 256)
     if args.cross_val:
         if args.num_folds == 10:
             cross_validation_10_folds(model,(40,512,512,4,256), model_config, dataset_config, args)
@@ -500,7 +500,7 @@ if __name__ == "__main__":
         es = None
         if args.early_stop:
             es = EarlyStopping(patience=7, min_delta=1e-3, type='max')
-            print("Early Stopping is eactivated")
+            print("Early Stopping is activated")
 
         results = train_run(
             model=model,
