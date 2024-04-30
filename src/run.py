@@ -215,17 +215,21 @@ def train_run(
     early_stopping:EarlyStopping=None,
 ):
     model.to(device)
+    params_wav = [p for p in model.wav2vec_encoder.parameters() if p.requires_grad]
+    params_wav_ids = {id(p) for p in params_wav}
+    params_other = [p for p in model.parameters() if p.requires_grad and id(p) not in params_wav_ids]
     params = [p for p in model.parameters() if p.requires_grad]
     print(f"Model : {model.__class__.__name__}")
     print(
-        f"Total Parameters: {sum(p.numel() for p in model.parameters())}\n Learnable parameters: {sum([p.numel() for p in params])}\n"
+        f"Total Parameters: {sum(p.numel() for p in model.parameters())}\n Learnable parameters: {sum([p.numel() for p in model.parameters() if p.requires_grad])}\n"
     )
     print("*" * 50)
     torch.cuda.empty_cache()
     gc.collect()
     torch.manual_seed(42)
     torch.cuda.manual_seed_all(42)
-    optimizer = torch.optim.AdamW(params, lr=float(config.lr))
+    # optimizer = torch.optim.AdamW([{'params':params_wav, 'lr':config.lr}, {'params':params_other, 'lr':config.lr_other}])
+    optimizer = torch.optim.AdamW(params, lr=config.lr)
     optimizer.zero_grad(set_to_none=True)
     scheduler = ReduceLROnPlateau(
         optimizer, "max", patience=5, min_lr=1e-8, verbose=True
@@ -474,9 +478,10 @@ if __name__ == "__main__":
     model_config = Config(config["COSER"])
     dataset_config = Config(config["DATASET"])
     model_config.lr = args.learning_rate
+    model_config.lr_other = float(model_config.lr_other)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     *_, test_dataloader = prepare_dataset_csv(dataset_config, test_rate=0.1)
-    model = SER2_shallow(40, 512, 512,4, 256)
+    model = SER2_transformer_block(40, 512, 512,8, 256)
     if args.cross_val:
         if args.num_folds == 10:
             cross_validation_10_folds(model,(40,512,512,4,256), model_config, dataset_config, args)
@@ -491,7 +496,7 @@ if __name__ == "__main__":
         torch.cuda.empty_cache()
         # model = SER3(40, 512, 512, 4, 256)
         #model = SER_WavLM(40, 512, 512, 4, 256)
-        model = SER_CONV(40, 512,512,1,256,4)
+        # model = SER_CONV(40, 512,512,1,256,4)
         if args.checkpoint:
             print(f"Model is loaded from checkpoint {args.checkpoint}")
             model.load_state_dict(torch.load(args.checkpoint)["model_state_dict"])

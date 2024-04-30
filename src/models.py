@@ -233,7 +233,7 @@ class BiLSTM(nn.Module):
 
 # Co-attention block
 class CoAttention(nn.Module):
-    def __init__(self, input_dim_q, input_dim_kv, embed_dim, n_heads):
+    def __init__(self, input_dim_q, input_dim_kv, embed_dim, out_dim, n_heads):
         super().__init__()
         assert(embed_dim % n_heads == 0), 'embed_dim does not divide n_heads!'
         self.n_heads = n_heads
@@ -242,6 +242,7 @@ class CoAttention(nn.Module):
         self.query = nn.Linear(input_dim_q, embed_dim)
         self.key = nn.Linear(input_dim_kv, embed_dim)
         self.value = nn.Linear(input_dim_kv, embed_dim)
+        self.proj = nn.Linear(embed_dim, out_dim)
       
 
     def scaled_dot_product(self,query,key,value, mask=None):
@@ -254,9 +255,9 @@ class CoAttention(nn.Module):
 
     def forward(self, x, y, return_attention=False):
         '''x: (B, T1, input_dim_q), y: (B, T2, input_dim_kv)'''
-        query = self.query(x)
-        key = self.key(y)
-        value = self.value(y)
+        query = self.query(x) #(B,T1, embed_dim)
+        key = self.key(y) #(B, T2, embed_dim)
+        value = self.value(y) #(B,T2, embed_dim)
         # split to multiple heads:
         B,T1,_ = query.shape
         B,T2,_ = key.shape
@@ -273,9 +274,9 @@ class CoAttention(nn.Module):
         attention, values = self.scaled_dot_product(query, key, value) # values : (B, n_heads, T1, head_dim)
         values = values.permute(0,2,1,3) # (B, T1, n_heads, head_dim)
         values = values.reshape(B, T1, self.n_heads * self.head_dim) # (B, T1, embed_dim)
-
-        # add & norm 
-        query = query.permute(0,2,1,3) # (B, T1, n_heads, head_dim)
+        
+        # projection layer :
+        values = self.proj(values) #(B, T1, out_dim)
         
         
         if return_attention:
@@ -283,6 +284,39 @@ class CoAttention(nn.Module):
         else:
             return values
         
+
+
+            
+class CoAttentionEncoderBlock(nn.Module):
+    def __init__(self, input_dim_q,  input_dim_kv ,embed_dim, ff_embed_dim, n_heads, dropout=0.0):
+        super().__init__()
+        self.attn = CoAttention(input_dim_q, input_dim_kv,embed_dim, input_dim_q, n_heads)
+        self.linear_layers = nn.Sequential(
+            nn.Linear(input_dim_q, ff_embed_dim),
+            nn.Dropout(dropout),
+            nn.GELU(),
+            nn.Linear(ff_embed_dim, input_dim_q)
+        )
+            
+        self.ln1 = nn.LayerNorm(input_dim_q)
+        self.ln2 = nn.LayerNorm(input_dim_q)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, y, return_attention=False):
+        '''x : (B, T1, input_dim_q), y: (B, T2, input_dim_kv)'''
+        attentions = None
+        if return_attention:
+            values, attentions = self.attn(x, y, return_attention) #(B, T1, embed_dim) , (B, T1, T2)
+        else:
+            values = self.attn(x, y)  
+        out = x + self.dropout(values) #(B,T1, embed_dim)
+       
+        out = self.ln1(out)
+        out = out + self.dropout(self.linear_layers(out)) #(B,T1, embed_dim)
+        out = self.ln2(out)
+        if return_attention:
+            return out, attentions
+        return out #(B,T1, embed_dim)
 
 
 class AttentionOutputLayer(nn.Module):
@@ -1037,3 +1071,57 @@ class SER2_shallow(nn.Module):
 
         return logits, loss
         
+        
+        
+        
+
+class SER2_transformer_block(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, n_labels=4):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.1)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=1, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=1)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.3)
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(input_dim_mfcc, n_labels)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+
+       
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, input_dim_mfcc), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+      
+        logits = logits.mean(1) # (B, n_labels)
+        loss = F.cross_entropy(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss

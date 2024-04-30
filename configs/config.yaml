@@ -12,6 +12,7 @@ COSER:
   dropout_satt: 0.0
   pooling: "avg"
   lr: 1e-4
+  lr_other: 5e-3
   ssl_model: "wav2vec"
 
 DATASET:
