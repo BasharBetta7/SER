@@ -60,7 +60,7 @@ class IEMOCAP_Dataset():
 
 # create train/val/test datasets  ~ 10/10/80 :
 # test set is randomly selected from dataset :
-def prepare_dataset_csv(config, valid_session='Ses01', test_rate=0.1):\
+def prepare_dataset_csv(config, valid_session='Ses01', test_rate=0.1):
 
     PATH_TO_WAV = config.wav_path
     PATH_TO_CSV = config.wav_csv
@@ -81,7 +81,7 @@ def prepare_dataset_csv(config, valid_session='Ses01', test_rate=0.1):\
     torch.cuda.manual_seed_all(42)
     test_size = int(test_rate * len(data))
     if test_size > 0:
-        idx = [] if test_size > 0 else torch.multinomial(torch.ones((len(data))), num_samples=test_size, replacement=False) # sample from uniform distribution 
+        idx = torch.multinomial(torch.ones((len(data))), num_samples=test_size, replacement=False) # sample from uniform distribution 
         test_data_csv = data.iloc[idx].copy()
         valid_data_csv = data[data['FileName'].str.match(valid_session) & ~data.index.isin(test_data_csv.index)]
         train_data_csv = data[~data.index.isin(valid_data_csv.index) & ~data.index.isin(test_data_csv.index)]

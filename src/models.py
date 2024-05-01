@@ -739,7 +739,7 @@ class SER_WavLM(nn.Module):
         # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
 
         # co-attetnion layer between mfcc and wav encodings
-        self.coatt = CoAttention(input_dim_mfcc, input_dim_wav,embed_dim, n_heads)
+        self.coatt = CoAttention(input_dim_mfcc, input_dim_wav,embed_dim, input_dim_mfcc,n_heads)
         # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
         
         # classification head 
