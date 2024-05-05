@@ -22,3 +22,5 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
 import argparse
 import yaml
+
+from pytorch_metric_learning import losses

@@ -1,6 +1,6 @@
 from imports import *
 from run import evaluate_metrics, create_dataloaders, Config, create_processor, extract_mfcc
-from models import SER2
+from models import SER2, SER2_transformer_block
 from prepare_dataset import IEMOCAP_Dataset
 @torch.no_grad()
 def test_split(model, test_dataloader, device='cuda'):
@@ -39,7 +39,7 @@ if __name__ == '__main__':
     
     torch.manual_seed(42)
     torch.cuda.manual_seed_all(42)
-    model = SER2(40, 512,512,4,256)
+    model = SER2_transformer_block(40, 512,512,4,256)
     model.load_state_dict(torch.load(args.checkpoint)['model_state_dict'])
     with open(args.config, "r") as file:
         config = yaml.safe_load(file)

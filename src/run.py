@@ -12,6 +12,7 @@ from models import *
 from prepare_dataset import prepare_dataset_csv, IEMOCAP_Dataset
 
 
+
 class Config:
     def __init__(self, config_dict):
         for (
@@ -61,6 +62,7 @@ def create_processor(wav2vec_config):
     return Wav2Vec2Processor(feature_extractor, tokenizer)
 
 
+audio_processor = create_processor("facebook/wav2vec2-base")
 def collate_2(batch_sample):  # extracts mfcc"
     # batch_sample is dict type, we want to output [X, y]
     batch_audio = [X["audio_input"] for X in batch_sample]

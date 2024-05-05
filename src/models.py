@@ -1,5 +1,5 @@
 from imports import *
-
+from utils import *
 
 # here we will extract a state from the 9th encoder block as it has the best phoneme-level ecnodings [cite from cross corpus wav2vec]
 class Wav2vec2Encoder(nn.Module):
@@ -1122,6 +1122,64 @@ class SER2_transformer_block(nn.Module):
       
         logits = logits.mean(1) # (B, n_labels)
         loss = F.cross_entropy(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss
+    
+    
+    
+            
+
+class SER2_transformer_block_arcFace(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, n_labels=4):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+
+        self.n_labels = n_labels
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.1)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=1, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=1)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.3)
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(input_dim_mfcc, n_labels)
+        self.Loss = AngularLoss()
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+
+       
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, input_dim_mfcc), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+      
+        logits = logits.mean(1) # (B, n_labels)
+        loss = torch.tensor(losses.ArcFaceLoss(self.n_labels, logits.shape[-1]), requires_grad=True)
 
         #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
         return logits, loss

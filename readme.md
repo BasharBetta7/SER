@@ -17,5 +17,10 @@ you can view hyperparameters by running:
 
 # evaluate the model:
 if you have a pre-trained model checkpoint, you can load its parameters and test it on the test set:
-> 
+> python src/eval_split.py --checkpoint {CHECKPOINT_PATH}
 
+# Inference mode:
+You can directly apply a pre-trained model on a speech audio and extract emotion label. simply type:
+> python src/infer.py --checkpoint {CHECKPOINT_PATH} --audio_path {PATH_TO_AUDIO} --device {cuda | cpu}
+
+which will output the assigned emotion to the audido, and the probability distribution over all emotion classes 
