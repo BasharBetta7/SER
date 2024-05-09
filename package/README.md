@@ -2,6 +2,9 @@
 clone the repository into your machine, then navigate to package/ and run:
 > python setup.py install
 
+or:
+> pip install caser
+
 which will add the package to your python environment.
 
 # Usage instructions:

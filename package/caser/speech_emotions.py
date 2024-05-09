@@ -20,7 +20,7 @@ def find_path(model_name):
 
 
 class CaserEmotionModel:
-    def __init__(self, model_name='', device='cpu'):
+    def __init__(self, model_name='caser', device='cpu'):
         self.device = device
         self.model= SER2_transformer_block(40, 512,512,8,256, 4)
         model_path = find_path(model_name)
