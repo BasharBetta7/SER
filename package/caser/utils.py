@@ -1,4 +1,4 @@
-from imports import * 
+from caser.imports import * 
 
 class CrossEntropyLoss(nn.Module):
     def __init__(self, type='normal'):

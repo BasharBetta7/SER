@@ -7,9 +7,9 @@
 # extract results : accuracy plots, confusion matrix
 # save results in external file
 
-from imports import *
-from models2 import *
-from prepare_dataset import prepare_dataset_csv, IEMOCAP_Dataset
+from caser.imports import *
+from caser.models import *
+from caser.prepare_dataset import prepare_dataset_csv, IEMOCAP_Dataset
 
 
 
@@ -217,9 +217,9 @@ def train_run(
     early_stopping:EarlyStopping=None,
 ):
     model.to(device)
-    # params_wav = [p for p in model.wav2vec_encoder.parameters() if p.requires_grad]
-    # params_wav_ids = {id(p) for p in params_wav}
-    # params_other = [p for p in model.parameters() if p.requires_grad and id(p) not in params_wav_ids]
+    params_wav = [p for p in model.wav2vec_encoder.parameters() if p.requires_grad]
+    params_wav_ids = {id(p) for p in params_wav}
+    params_other = [p for p in model.parameters() if p.requires_grad and id(p) not in params_wav_ids]
     params = [p for p in model.parameters() if p.requires_grad]
     print(f"Model : {model.__class__.__name__}")
     print(

@@ -1,0 +1,20 @@
+Metadata-Version: 2.1
+Name: caser
+Version: 0.1
+Summary: CA-SER python library for speech emotion recognition
+Home-page: https://github.com/BasharBetta7/SER/tree/master
+Author: Bashar M. Deeb
+Author-email: Bashar.betta9@gmail.com
+Keywords: audio speech emotion recognition
+Requires-Dist: librosa==0.10.1
+Requires-Dist: matplotlib==3.7.2
+Requires-Dist: numpy==1.24.3
+Requires-Dist: pandas==1.5.3
+Requires-Dist: PyYAML==6.0.1
+Requires-Dist: PyYAML==6.0.1
+Requires-Dist: scikit_learn==1.3.2
+Requires-Dist: torch==2.2.1
+Requires-Dist: torchaudio==2.2.1
+Requires-Dist: tqdm==4.65.0
+Requires-Dist: transformers==4.32.1
+Requires-Dist: gdown

@@ -1,1 +1,15 @@
 /data/iemocap
+/notebooks/
+/checkpoints
+/WavLM_Checkpoints/
+/play_around/
+/.vscode/
+/CHECKPOINTS_CV_5/
+/CHECKPOINTS_CV_5_no_attn/
+/CHECKPOINTS_CV_5_shallow/
+/data/audio_inference
+/MODELS/
+/package/__pycache__
+/package/build
+/package/dist
+/src/__pycache__

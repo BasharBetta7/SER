@@ -1,5 +1,5 @@
-from imports import *
-from utils import *
+from caser.imports import *
+from caser.utils import *
 
 # here we will extract a state from the 9th encoder block as it has the best phoneme-level ecnodings [cite from cross corpus wav2vec]
 class Wav2vec2Encoder(nn.Module):
