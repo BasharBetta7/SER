@@ -152,7 +152,7 @@ class CaserEmotionModel:
 
         if return_logits:
             
-            return {'Prediction':[index_to_name[index_to_label[logits.argmax().item()]] for logits in logits_list], 'logits': [logits for logits in logits_list]}
+            return {'Prediction':[index_to_name[index_to_label[logits.argmax().item()]] for logits in logits_list], 'logits': [logits.detach() for logits in logits_list]}
         else:
             return {'Predictions':[index_to_name[index_to_label[logits.argmax().item()]] for logits in logits_list] }
 

@@ -377,19 +377,11 @@ class SER2_transformer_block(nn.Module):
         #Feature ENcdoer MOdule:
         self.feature_encoder_module = FeatureEncoderModule(n_mfcc, input_dim_mfcc, dropout=0.1)
        
-        # mfcc_encoding layer:
-        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.1)
-
-
-        # mfcc linear layer:
-        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
-        self.mfcc_att = TransformerEncoder(num_encoders=1, input_dim=input_dim_mfcc,ff_embed_dim=1024,n_heads=1)
-        # add self attention for mfcc later 
-        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
 
         # co-attetnion layer between mfcc and wav encodings
         self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.3)
         # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
         
         # classification head 
         self.cls_head= nn.Linear(input_dim_mfcc, n_labels)

@@ -483,7 +483,7 @@ if __name__ == "__main__":
     model_config.lr_other = float(model_config.lr_other)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     *_, test_dataloader = prepare_dataset_csv(dataset_config, test_rate=0.1)
-    model = SER2_transformer_block(40, 512, 512,8, 256)
+    model = SER2_transformer_block(40, 512, 512, 8, 256)
     if args.cross_val:
         if args.num_folds == 10:
             cross_validation_10_folds(model,(40,512,512,4,256), model_config, dataset_config, args)

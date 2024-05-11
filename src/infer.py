@@ -71,8 +71,7 @@ def infer_model(model:SER2_transformer_block, audio_path:str, device):
             # forward pass:
             logits, loss = model(xtr_1.to(device), xtr_2.to(device), ytr.to(device))
             
-    index_to_name = {'hap': 'Happy', 'neu': 'Neutral', 'sad': 'Sad', 'ang':'Angry'}
-    #print({index_to_label[x]:logits[x] for x in index_to_label.keys()})  
+    index_to_name = {'hap': 'Happy', 'neu': 'Neutral', 'sad': 'Sad', 'ang':'Angry'} 
 
     return {'Prediction':index_to_name[index_to_label[logits.argmax().item()]], 'logits': {index_to_label[k]:f'{logits[0,k].item():.4f}' for k in index_to_label.keys()}}
 

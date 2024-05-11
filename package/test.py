@@ -1,5 +1,5 @@
 from caser.speech_emotions import CaserEmotionModel
 
 
-er = CaserEmotionModel(model_name='caser', device='cpu')
-print(er.predict_microphone(5))
+er = CaserEmotionModel(model_name='caser', device='cuda')
+print(er.predict_emotion(''))
