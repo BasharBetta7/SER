@@ -409,3 +409,50 @@ class SER2_transformer_block(nn.Module):
     
     
         
+class SER2_transformer_dual(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, n_labels=4):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+
+        # SSL_module:
+        self.ssl_module = SSLModule(input_dim_wav)
+        
+        #Feature ENcdoer MOdule:
+        self.feature_encoder_module = FeatureEncoderModule(n_mfcc, input_dim_mfcc, dropout=0.1)
+       
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.4)
+        self.coatt2 = CoAttentionEncoderBlock(input_dim_wav, input_dim_mfcc, embed_dim, 1024, n_heads, 0.4)
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        
+        # classification head 
+        self.cls_head= nn.Linear(input_dim_mfcc, n_labels)
+        self.cls_head2 = nn.Linear(input_dim_wav, n_labels)
+        
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        
+       
+        wav_enc_lin = self.ssl_module(x_wav) # (B, T1, input_dim_wav)
+        mfcc_enc_att = self.feature_encoder_module(x_mfcc) #(B, T2, input_dim_mfcc) with attention 
+
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, input_dim_mfcc), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        wav_aware_mfcc, attention_scores = self.coatt2(wav_enc_lin, mfcc_enc_att, return_attention=True) #(B, T1, input_dim_wav), (B, T1, T2)
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+        logits2 = self.cls_head2(wav_aware_mfcc) #(B, T1, n_labels)
+        
+        logits = logits.mean(1) # (B, n_labels)
+        logits2 = logits2.mean(1) #(B, n_labels)
+        
+        logits = logits + logits2
+        
+        loss = F.cross_entropy(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss

@@ -1183,3 +1183,7 @@ class SER2_transformer_block_arcFace(nn.Module):
 
         #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
         return logits, loss
+    
+    
+    
+    

@@ -234,7 +234,7 @@ def train_run(
     optimizer = torch.optim.AdamW(params, lr=config.lr)
     optimizer.zero_grad(set_to_none=True)
     scheduler = ReduceLROnPlateau(
-        optimizer, "max", patience=5, min_lr=1e-8, verbose=True
+        optimizer, "max", patience=5, min_lr=config.reduce_lr, verbose=True
     )
     logs_freq = 50
 
@@ -465,6 +465,7 @@ if __name__ == "__main__":
         "--save_path", default="./checkpoints", help="results file path"
     )
     parser.add_argument("--early_stop", action="store_true")
+    parser.add_argument("--reduce_lr", action="store_true")
     parser.add_argument("--cross_val", action="store_true")
     parser.add_argument("--model_name", type=str, default="")
     parser.add_argument("--valid_session", type=str, default="Ses01")
@@ -481,9 +482,15 @@ if __name__ == "__main__":
     dataset_config = Config(config["DATASET"])
     model_config.lr = args.learning_rate
     model_config.lr_other = float(model_config.lr_other)
+    if args.reduce_lr:
+        model_config.reduce_lr = 1e-8
+        print('Scheduler activated')
+    else:
+        model_config.reduce_lr = model_config.lr
     device = "cuda" if torch.cuda.is_available() else "cpu"
     *_, test_dataloader = prepare_dataset_csv(dataset_config, test_rate=0.1)
-    model = SER2_transformer_block(40, 512, 512, 8, 256)
+    model = SER2_transformer_block(40, 512, 512, 4, 256)
+    # model = SER2_transformer_dual(40, 512, 512, 4, 256)
     if args.cross_val:
         if args.num_folds == 10:
             cross_validation_10_folds(model,(40,512,512,4,256), model_config, dataset_config, args)
@@ -506,7 +513,7 @@ if __name__ == "__main__":
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=7, min_delta=1e-3, type='max')
+            es = EarlyStopping(patience=10, min_delta=1e-3, type='max')
             print("Early Stopping is activated")
 
         results = train_run(

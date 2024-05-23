@@ -14,6 +14,7 @@ COSER:
   lr: 1e-4
   lr_other: 5e-3
   ssl_model: "wav2vec"
+  reduce_lr: 1e-8
 
 DATASET:
   wav_path: "./data/iemocap"
