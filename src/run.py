@@ -12,7 +12,6 @@ from models2 import *
 from prepare_dataset import prepare_dataset_csv, IEMOCAP_Dataset
 
 
-
 class Config:
     def __init__(self, config_dict):
         for (
@@ -63,6 +62,8 @@ def create_processor(wav2vec_config):
 
 
 audio_processor = create_processor("facebook/wav2vec2-base")
+
+
 def collate_2(batch_sample):  # extracts mfcc"
     # batch_sample is dict type, we want to output [X, y]
     batch_audio = [X["audio_input"] for X in batch_sample]
@@ -159,7 +160,7 @@ def create_dataloaders(
         shuffle=False,
         collate_fn=collate,
     )
-    
+
     test_dataloader = DataLoader(
         dataset=test_dataset,
         batch_size=batch_size,
@@ -178,23 +179,31 @@ def evaluate_metrics(ypred, ytrue):
     ua = (ypred == ytrue).float().mean()
     ypred_onehot = torch.eye(4)[ypred.long()]
     ytrue_onehot = torch.eye(4)[ytrue.long()]
+    weights = torch.sum(ytrue_onehot, 0) / torch.sum(ytrue_onehot)
     wa = torch.mean(
         torch.sum((ypred_onehot == ytrue_onehot) * ytrue_onehot, 0)
         / torch.sum(ytrue_onehot.int(), 0)
     )
+    # ua = torch.mean(
+    #     torch.sum((ypred_onehot == ytrue_onehot) * ytrue_onehot, 0)
+    #     / torch.sum(ytrue_onehot.int(), 0)
+    # )
+
+    # wa = torch.sum(torch.sum((ypred_onehot == ytrue_onehot) * ytrue_onehot, 0)
+    #                / torch.sum(ytrue_onehot,0) * weights)
     return wa.item(), ua.item()
 
 
-class  EarlyStopping:
-    def __init__(self, patience=7, min_delta=0.0, type='min'):
+class EarlyStopping:
+    def __init__(self, patience=7, min_delta=0.0, type="min"):
         self.patience = patience
         self.min_delta = min_delta
         self.counter = 0
-        self.min_loss = float("inf") 
+        self.min_loss = float("inf")
         self.type = type
 
     def early_stop(self, loss):
-        if self.type == 'max':
+        if self.type == "max":
             loss *= -1
         if loss < self.min_loss:
             self.min_loss = loss
@@ -214,7 +223,9 @@ def train_run(
     valid_dl,
     batch_size,
     accum_iter,
-    early_stopping:EarlyStopping=None,
+    early_stopping: EarlyStopping = None,
+    device="cuda",
+    save_params=True,
 ):
     model.to(device)
     # params_wav = [p for p in model.wav2vec_encoder.parameters() if p.requires_grad]
@@ -228,10 +239,10 @@ def train_run(
     print("*" * 50)
     torch.cuda.empty_cache()
     gc.collect()
-    torch.manual_seed(42)
     torch.cuda.manual_seed_all(42)
+    torch.manual_seed(42)
     # optimizer = torch.optim.AdamW([{'params':params_wav, 'lr':config.lr}, {'params':params_other, 'lr':config.lr_other}])
-    optimizer = torch.optim.AdamW(params, lr=config.lr)
+    optimizer = torch.optim.AdamW(params, lr=float(config.lr))
     optimizer.zero_grad(set_to_none=True)
     scheduler = ReduceLROnPlateau(
         optimizer, "max", patience=5, min_lr=config.reduce_lr, verbose=True
@@ -356,14 +367,16 @@ def train_run(
         "validation_ua_per_epoch": ua_val,
         "train_wa_per_epoch": wa_tr,
         "train_ua_per_epoch": ua_tr,
-        "logs": logs,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "best_chkpt": chkpt,
+        "logs": logs if save_params else "not saved",
+        "model_state_dict": model.state_dict() if save_params else "not saved",
+        "optimizer_state_dict": optimizer.state_dict() if save_params else "not saved",
+        "best_chkpt": chkpt if save_params else "not saved"
     }
 
 
-def cross_validation_5_folds(model,model_args:tuple, model_config:Config, dataset_config:Config, args):
+def cross_validation_5_folds(
+    model, model_args: tuple, model_config: Config, dataset_config: Config, args
+):
     cv_results = []
     print("START CROSS-VALIDATION...")
     model.__init__(*model_args)
@@ -382,7 +395,7 @@ def cross_validation_5_folds(model,model_args:tuple, model_config:Config, datase
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=7, min_delta=0.0, type='max')
+            es = EarlyStopping(patience=7, min_delta=0.0, type="max")
             print("Early Stopping is activated")
         results = train_run(
             model=model,
@@ -399,20 +412,30 @@ def cross_validation_5_folds(model,model_args:tuple, model_config:Config, datase
             results,
             f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
         )
-        print(f'stats of the fold are saved in P{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt')
+        print(
+            f"stats of the fold are saved in P{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt"
+        )
     torch.save(
         cv_results,
         f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_5.pt",
     )
-    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_5.pt")
-    
-    
-def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Config, dataset_config:Config, args):
+    print(
+        f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_5.pt"
+    )
+
+
+def cross_validation_10_folds(
+    model: nn.Module,
+    model_args: tuple,
+    model_config: Config,
+    dataset_config: Config,
+    args,
+):
     cv_results = []
     print("START CROSS-VALIDATION...")
-    
+
     model.__init__(*model_args)
-    for i in '1F,2M,2F,3M,3F,4M,4F,5M,5F'.split(sep=','):
+    for i in "1F,2M,2F,3M,3F,4M,4F,5M,5F".split(sep=","):
         print(f"Fold #{i}")
         print("PREPARING DATASET...")
         train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
@@ -426,7 +449,7 @@ def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Con
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=7, min_delta=1e-3, type='max')
+            es = EarlyStopping(patience=7, min_delta=1e-3, type="max")
             print("Early Stopping is activated")
         results = train_run(
             model=model,
@@ -437,28 +460,39 @@ def cross_validation_10_folds(model:nn.Module,model_args:tuple, model_config:Con
             batch_size=args.batch_size,
             accum_iter=args.accum_grad,
             early_stopping=es,
+            save_params=False
         )
         cv_results.append(results)
         torch.save(
             results,
             f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt",
         )
-        print(f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt")
+        print(
+            f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_fold_{i}.pt"
+        )
     torch.save(
         cv_results,
         f"{args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_10.pt",
     )
-    print(f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_10.pt")
+    print(
+        f"stats are saved in {args.save_path}/{model.__class__.__name__}_{args.model_name}_cv_results_10.pt"
+    )
 
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(prog='SER_Co_attention', description='train Speech Emotion Recognition Model on IEMOCAP dataset')
+    parser = argparse.ArgumentParser(
+        prog="SER_Co_attention",
+        description="train Speech Emotion Recognition Model on IEMOCAP dataset",
+    )
     parser.add_argument(
-        "--config", type=str, default='./configs/config.yaml', help="configuration .yaml file path"
+        "--config",
+        type=str,
+        default="./configs/config.yaml",
+        help="configuration .yaml file path",
     )
     parser.add_argument("--batch_size", type=int, default=2, required=False)
-    parser.add_argument("--epochs", type=int,default=20)
+    parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--learning_rate", type=float, default=4e-5)
     parser.add_argument("--accum_grad", type=int, default=4)
     parser.add_argument(
@@ -470,32 +504,87 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="")
     parser.add_argument("--valid_session", type=str, default="Ses01")
     parser.add_argument("--checkpoint", type=str, required=False, default=None)
-    parser.add_argument("--num_folds", type=int, default=10, choices=[5,10], help='choose between 10-fold and 5-fold cross validation')
+    parser.add_argument(
+        "--num_folds",
+        type=int,
+        default=10,
+        choices=[5, 10],
+        help="choose between 10-fold and 5-fold cross validation",
+    )
     args = parser.parse_args()
 
     with open(args.config, "r") as file:
         config = yaml.safe_load(file)
-        
-    torch.manual_seed(42)
+
     torch.cuda.manual_seed_all(42)
+    torch.manual_seed(42)
     model_config = Config(config["COSER"])
     dataset_config = Config(config["DATASET"])
     model_config.lr = args.learning_rate
     model_config.lr_other = float(model_config.lr_other)
     if args.reduce_lr:
-        model_config.reduce_lr = 1e-8
-        print('Scheduler activated')
+        model_config.reduce_lr = 1e-6
+        print("Scheduler activated")
     else:
         model_config.reduce_lr = model_config.lr
     device = "cuda" if torch.cuda.is_available() else "cpu"
     *_, test_dataloader = prepare_dataset_csv(dataset_config, test_rate=0.1)
-    model = SER2_transformer_block(40, 512, 512, 4, 256)
+    from models import *
+
+    model = SER2_transformer_block_alpha(
+        n_mfcc=40,
+        input_dim_mfcc=512,
+        input_dim_wav=512,
+        n_heads=8,
+        embed_dim=256,
+        num_encoders=3,
+        n_heads_att=4,
+        n_labels=4,
+        alpha=0.4,
+        pooling="max",
+        loss='focal',
+    )
+    alpha_range = [0, 0.1, 0.2, 0.4, 0.8, 1.6]
+    # model = SER2_transformer_block_alpha(
+    #     n_mfcc=40,
+    #     input_dim_mfcc=512,
+    #     input_dim_wav=512,
+    #     n_heads=8,
+    #     embed_dim=256,
+    #     num_encoders=3,
+    #     n_heads_att=4,
+    #     n_labels=4,
+    #     alpha=0.4,
+    #     pooling="max",
+    #     loss='focal'
+    # )
+    # model= SER2_transformer_block_alpha_linear_encoder(
+    #     n_mfcc=40,
+    #     input_dim_mfcc=512,
+    #     input_dim_wav=512,
+    #     n_heads=8,
+    #     embed_dim=256,
+    #     num_encoders=3,
+    #     n_heads_att=4,
+    #     n_labels=4,
+    #     alpha=0.4,
+    #     pooling="max",
+    #     loss='focal'
+    # )
     # model = SER2_transformer_dual(40, 512, 512, 4, 256)
     if args.cross_val:
         if args.num_folds == 10:
-            cross_validation_10_folds(model,(40,512,512,4,256), model_config, dataset_config, args)
+            cross_validation_10_folds(
+                model, (40, 512, 512, 8, 256, 3,4,4,0.4, 'max', 'focal'), model_config, dataset_config, args
+            )
         elif args.num_folds == 5:
-            cross_validation_5_folds(model,(40,512,512,4,256), model_config, dataset_config, args)
+            cross_validation_5_folds(
+                model,
+                (40, 512, 512, 8, 256, 3, 4, 4, 0.4, "max"),
+                model_config,
+                dataset_config,
+                args,
+            )
     else:
         train_dataloader, valid_dataloader, test_dataloader = create_dataloaders(
             model_config, dataset_config, args, valid_session=args.valid_session
@@ -504,7 +593,7 @@ if __name__ == "__main__":
         gc.collect()
         torch.cuda.empty_cache()
         # model = SER3(40, 512, 512, 4, 256)
-        #model = SER_WavLM(40, 512, 512, 4, 256)
+        # model = SER_WavLM(40, 512, 512, 4, 256)
         # model = SER_CONV(40, 512,512,1,256,4)
         if args.checkpoint:
             print(f"Model is loaded from checkpoint {args.checkpoint}")
@@ -513,8 +602,9 @@ if __name__ == "__main__":
 
         es = None
         if args.early_stop:
-            es = EarlyStopping(patience=10, min_delta=1e-3, type='max')
+            es = EarlyStopping(patience=10, min_delta=1e-3, type="max")
             print("Early Stopping is activated")
+        print(f'LOSS FUNCTION : {model_config.loss}')
 
         results = train_run(
             model=model,
@@ -525,6 +615,7 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             accum_iter=int(args.accum_grad),
             early_stopping=es,
+            save_params=True
         )
         torch.save(
             results, f"{args.save_path}/{model.__class__.__name__}_{args.model_name}.pt"

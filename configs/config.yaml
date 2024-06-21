@@ -2,19 +2,24 @@ COSER:
   n_mfcc: 40
   input_dim_mfcc: 512
   input_dim_wav: 512
-  n_heads_coatt: 4
+  n_heads_coatt: 8
   embed_dim: 256
   n_classes: 4
   dropout_lstm: 0.1
-  num_encoders_satt: 1
+  num_encoders_satt: 3
   embed_dim_satt: 1024
-  n_heads_satt: 1
+  n_heads_satt: 4
+  alpha: 0.4
+  batch_size: 4
+  accum_grad: 4
+  pooling: max
   dropout_satt: 0.0
   pooling: "avg"
-  lr: 1e-4
+  lr: 4e-5
   lr_other: 5e-3
   ssl_model: "wav2vec"
   reduce_lr: 1e-8
+  loss: "focal"
 
 DATASET:
   wav_path: "./data/iemocap"

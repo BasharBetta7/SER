@@ -1,5 +1,7 @@
 from imports import * 
 
+
+
 class CrossEntropyLoss(nn.Module):
     def __init__(self, type='normal'):
         super().__init__()
@@ -7,12 +9,16 @@ class CrossEntropyLoss(nn.Module):
         self.type = type
     def forward(self, inputs, targets):
         ce = F.cross_entropy(inputs, targets, reduction='none')
+        pt = torch.exp(-ce)
         if self.type == 'focal':
-            loss = (1.0 - inputs[targets]) ** self.gamma * ce
+            loss = (1.0 - pt) ** self.gamma * ce
             loss = loss.mean()
+            return loss
         else:
             loss = ce.mean()
+            return loss
             
+
 class ArcFaceLoss(nn.Module):
     def __init__(self, num_classes, embedding_size, margin, scale):
         """

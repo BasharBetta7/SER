@@ -137,7 +137,7 @@ class PositionalEncoding(nn.Module):
 
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, num_encoders, input_dim, ff_embed_dim, n_heads, dropout=0.0):
+    def __init__(self, num_encoders, input_dim, ff_embed_dim, n_heads, dropout=0.3):
         super().__init__()
         self.pos_embed = PositionalEncoding(input_dim)
         self.encoders = nn.ModuleList([EncoderBlock(input_dim=input_dim, ff_embed_dim=ff_embed_dim, n_heads=n_heads, dropout=dropout) for _ in range(num_encoders)])
@@ -1186,4 +1186,331 @@ class SER2_transformer_block_arcFace(nn.Module):
     
     
     
+    
+
+class SER2_transformer_block_alpha(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, num_encoders,  n_heads_att,n_labels=4,  alpha=0.5, pooling= 'avg', loss='normal'):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+        
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.3)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=num_encoders, input_dim=input_dim_mfcc, ff_embed_dim=1024, n_heads=n_heads_att)
+       
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.4) 
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(input_dim_mfcc, n_labels)
+        self.cls_mfcc = nn.Linear(input_dim_mfcc, n_labels)
+        self.mfcc_act = nn.ReLU()
+        self.alpha = alpha
+        self.pooling = pooling
+        self.loss = CrossEntropyLoss(loss)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+        
+        logits_mfcc = self.mfcc_act(self.cls_head(mfcc_enc_att)) #(B, T2, n_labels)
+
+        if self.pooling == 'avg':       
+            logits_mfcc = logits_mfcc.mean(1) #(B, n_labels)
+        elif self.pooling == 'max':
+            logits_mfcc = logits_mfcc.max(1).values #(B, n_labels)
+       
+        loss2 = self.loss(logits_mfcc, y)
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, input_dim_mfcc), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+        if self.pooling == 'avg':       
+            logits = logits.mean(1) # (B, n_labels)
+        elif self.pooling == 'max':
+            logits = logits.max(1).values
+        loss = self.loss(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss + self.alpha * loss2
+    
+    
+   ############################### ABLATION STUDY ##############################
+   
+   ## EFFECT OF FEATURE ENCODER:
+   ### MODEL WITH NO FEM
+class SER2_transformer_block_alpha_no_fem(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, num_encoders,  n_heads_att,n_labels=4,  alpha=0.5, pooling= 'avg', loss='normal'):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+        
+        # mfcc_encoding layer:
+        # self.mfcc_encoder = nn.Linear(n_mfcc, input_dim_mfcc)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(n_mfcc, input_dim_mfcc)
+        # self.mfcc_att = TransformerEncoder(num_encoders=num_encoders, input_dim=n_mfcc, ff_embed_dim=1024, n_heads=n_heads_att)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.4) 
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head = nn.Linear(input_dim_mfcc, n_labels)
+        self.cls_mfcc = nn.Linear(input_dim_mfcc, n_labels)
+        self.mfcc_act = nn.ReLU()
+        self.alpha = alpha
+        self.pooling = pooling
+        self.loss = CrossEntropyLoss(loss)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+       # mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(x_mfcc) # (B, T2, input_dim_mfcc)
+        # mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+        
+        logits_mfcc = self.mfcc_act(self.cls_head(mfcc_enc_lin)) #(B, T2, n_labels)
+        
+
+        if self.pooling == 'avg':       
+            logits_mfcc = logits_mfcc.mean(1) #(B, n_labels)
+        elif self.pooling == 'max':
+            logits_mfcc = logits_mfcc.max(1).values #(B, n_labels)
+       
+        loss2 = self.loss(logits_mfcc, y)
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_lin, wav_enc_lin, return_attention=True) # (B, T2, input_dim_mfcc), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        print(mfcc_aware_wav)
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+        if self.pooling == 'avg':       
+            logits = logits.mean(1) # (B, n_labels)
+        elif self.pooling == 'max':
+            logits = logits.max(1).values
+        loss = self.loss(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+     
+        return logits, loss + self.alpha * loss2
+   
+   ### MODEL WITH NO BLSTM
+class SER2_transformer_block_alpha_no_blstm(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, num_encoders,  n_heads_att,n_labels=4,  alpha=0.5, pooling= 'avg', loss='normal'):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+        
+        # mfcc_encoding layer:
+        self.mfcc_encoder = nn.Linear(n_mfcc, input_dim_mfcc)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(n_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=num_encoders, input_dim=n_mfcc, ff_embed_dim=1024, n_heads=n_heads_att)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.4) 
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(input_dim_mfcc, n_labels)
+        self.cls_mfcc = nn.Linear(input_dim_mfcc, n_labels)
+        self.mfcc_act = nn.ReLU()
+        self.alpha = alpha
+        self.pooling = pooling
+        self.loss = CrossEntropyLoss(loss)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+       # mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(x_mfcc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+        
+        logits_mfcc = self.mfcc_act(self.cls_head(mfcc_enc_att)) #(B, T2, n_labels)
+
+        if self.pooling == 'avg':       
+            logits_mfcc = logits_mfcc.mean(1) #(B, n_labels)
+        elif self.pooling == 'max':
+            logits_mfcc = logits_mfcc.max(1).values #(B, n_labels)
+       
+        loss2 = self.loss(logits_mfcc, y)
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, input_dim_mfcc), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+        if self.pooling == 'avg':       
+            logits = logits.mean(1) # (B, n_labels)
+        elif self.pooling == 'max':
+            logits = logits.max(1).values
+        loss = self.loss(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss + self.alpha * loss2
+    
+    
+   ### MODEL WITH SIMPLE LINEAR INPLACE OF BLSTM
+class SER2_transformer_block_alpha_linear_encoder(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, num_encoders,  n_heads_att,n_labels=4,  alpha=0.5, pooling= 'avg', loss='normal'):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+        #wav2vec enocding layer:
+        self.wav2vec_encoder = Wav2vec2Encoder()
+        
+        # mfcc_encoding layer:
+        self.mfcc_encoder = nn.Linear(n_mfcc, input_dim_mfcc)
+
+        # wav2vec linear layer:
+        self.wav2vec_ff = nn.Linear(768, input_dim_wav)
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=num_encoders, input_dim=input_dim_mfcc, ff_embed_dim=1024, n_heads=n_heads_att)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        # co-attetnion layer between mfcc and wav encodings
+        self.coatt = CoAttentionEncoderBlock(input_dim_mfcc, input_dim_wav, embed_dim, 1024, n_heads, 0.4) 
+        # self.coatt_addnorm = AttentionOutputLayer(embed_dim, dropout=0.0)
+        
+        # classification head 
+        self.cls_head= nn.Linear(input_dim_mfcc, n_labels)
+        self.cls_mfcc = nn.Linear(input_dim_mfcc, n_labels)
+        self.mfcc_act = nn.ReLU()
+        self.alpha = alpha
+        self.pooling = pooling
+        self.loss = CrossEntropyLoss(loss)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        wav_enc = F.tanh(self.wav2vec_encoder(x_wav)) # (B, T1, 768)
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+
+        wav_enc_lin = self.wav2vec_ff(wav_enc) # (B, T1, input_dim_wav)
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+        
+        logits_mfcc = self.mfcc_act(self.cls_head(mfcc_enc_att)) #(B, T2, n_labels)
+
+        if self.pooling == 'avg':       
+            logits_mfcc = logits_mfcc.mean(1) #(B, n_labels)
+        elif self.pooling == 'max':
+            logits_mfcc = logits_mfcc.max(1).values #(B, n_labels)
+       
+        loss2 = self.loss(logits_mfcc, y)
+
+        mfcc_aware_wav, attention_scores = self.coatt(mfcc_enc_att, wav_enc_lin, return_attention=True) # (B, T2, input_dim_mfcc), (B, T2, T1)
+        #mfcc_aware_wav_addnorm = self.coatt_addnorm(mfcc_aware_wav, mfcc_enc_lin) #(B,T2,embed_dim)
+        
+        
+        logits = self.cls_head(mfcc_aware_wav) #(B, T2, n_labels)
+        if self.pooling == 'avg':       
+            logits = logits.mean(1) # (B, n_labels)
+        elif self.pooling == 'max':
+            logits = logits.max(1).values
+        loss = self.loss(logits, y)
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits, loss + self.alpha * loss2
+
+
+
+
+
+class SER2_transformer_block_alpha_pretrain(nn.Module):
+    def __init__(self, n_mfcc, input_dim_mfcc, input_dim_wav, n_heads, embed_dim, num_encoders,  n_heads_att,n_labels=4,  alpha=0.5, pooling= 'avg', loss='normal'):
+        super().__init__()
+        assert input_dim_mfcc == input_dim_wav, 'number of ecnoding dimensions must be the same between mfcc and wav2vec'
+
+       
+        
+        # mfcc_encoding layer:
+        self.mfcc_encoder = BiLSTM(n_mfcc, input_dim_mfcc, 0, dropout=0.3)
+
+        
+
+        # mfcc linear layer:
+        self.mfcc_ff = nn.Linear(2 * input_dim_mfcc, input_dim_mfcc)
+        self.mfcc_att = TransformerEncoder(num_encoders=num_encoders, input_dim=input_dim_mfcc, ff_embed_dim=1024, n_heads=n_heads_att)
+        # add self attention for mfcc later 
+        # self.mfcc_mhsa = MultiHeadAttention(input_dim_mfcc, embed_dim, n_heads)
+
+        
+        
+        # classification head 
+       
+        self.cls_head = nn.Linear(input_dim_mfcc, n_labels)
+        self.mfcc_act = nn.ReLU()
+        self.alpha = alpha
+        self.pooling = pooling
+        self.loss = CrossEntropyLoss(loss)
+
+    def forward(self, x_wav, x_mfcc, y):
+        '''x_wav: (B, 1, T), x_mfcc:(B, T2, n_mfcc), y:(B)'''
+        
+        mfcc_enc = self.mfcc_encoder(x_mfcc) # (B, T2, input_dim_mfcc)
+
+
+       
+        mfcc_enc_lin = self.mfcc_ff(mfcc_enc) # (B, T2, input_dim_mfcc)
+        mfcc_enc_att = self.mfcc_att(mfcc_enc_lin) # (B, T2, input_dim_mfcc) with attention 
+        
+        logits_mfcc = self.mfcc_act(self.cls_head(mfcc_enc_att)) #(B, T2, n_labels)
+
+        if self.pooling == 'avg':       
+            logits_mfcc = logits_mfcc.mean(1) #(B, n_labels)
+        elif self.pooling == 'max':
+            logits_mfcc = logits_mfcc.max(1).values #(B, n_labels)
+       
+        loss2 = self.loss(logits_mfcc, y)
+       
+
+        #print(f"model logs:\n wav_env: {wav_enc.shape}| mfcc_enc: {mfcc_enc.shape}\n wav_enc_lin: {wav_enc_lin.shape}| mfcc_enc_lin: {mfcc_enc_lin.shape}\n mfcc_aware_wav: {mfcc_aware_wav.shape}| attention_scores: {attention_scores.shape}")
+        return logits_mfcc, loss2
     
