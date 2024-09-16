@@ -4,6 +4,7 @@ from caser.models import SER2_transformer_block
 from caser.prepare_dataset import *
 import gdown
 import sounddevice as sd
+import time
 
 def find_path(model_name):
     model_file=model_name+'.pt'
@@ -104,6 +105,7 @@ class CaserEmotionModel:
             collate_fn=self.collate,
         )
         logits = None
+        start_time = time.time()
         for i, batch_dict in enumerate(dl):
                 xtr_1 = batch_dict["batch_audio"]
                 xtr_2 = batch_dict["batch_mfcc"]
@@ -113,12 +115,13 @@ class CaserEmotionModel:
                 logits, loss = self.model(xtr_1.to(self.device), xtr_2.to(self.device), ytr.to(self.device))
        
         index_to_name = {'hap': 'Happy', 'neu': 'Neutral', 'sad': 'Sad', 'ang':'Angry'} 
-       
+        end_time = time.time()
         if return_logits:
             
-            return {'Prediction':index_to_name[index_to_label[logits.argmax().item()]], 'logits': {index_to_label[k]:f'{logits[0,k].item():.4f}' for k in index_to_label.keys()}}
+            return {'Time':(end_time- start_time),'Prediction':index_to_name[index_to_label[logits.argmax().item()]], 'logits': {index_to_label[k]:f'{logits[0,k].item():.4f}' for k in index_to_label.keys()}}
+
         else:
-            return {'Prediction':index_to_name[index_to_label[logits.argmax().item()]]}
+            return {'Time': (end_time - start_time), 'Prediction':index_to_name[index_to_label[logits.argmax().item()]]}
         
     # predict emotions of list of audio files 
     def predict_emotion_multi(self, audio_wav:list, return_logits=True):

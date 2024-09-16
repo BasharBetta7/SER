@@ -1,11 +1,13 @@
 from imports import *
 from run import audio_processor, evaluate_metrics, create_dataloaders,  Config, create_processor, extract_mfcc
-from models import SER2_transformer_block
+from models import SER2_transformer_block_alpha
+import time
+
 from prepare_dataset import IEMOCAP_Dataset,index_to_label, label_to_index
 
 
 @torch.no_grad()
-def infer_model(model:SER2_transformer_block, audio_path:str, device):
+def infer_model(model:SER2_transformer_block_alpha, audio_path:str, device):
     '''
     model: pre-trained model from checkpoint
     '''
@@ -63,17 +65,20 @@ def infer_model(model:SER2_transformer_block, audio_path:str, device):
         collate_fn=collate,
     )
     logits = None
+    
     for i, batch_dict in enumerate(dl):
             xtr_1 = batch_dict["batch_audio"]
             xtr_2 = batch_dict["batch_mfcc"]
             ytr = batch_dict["batch_labels"]
 
             # forward pass:
+            start_time = time.time()
             logits, loss = model(xtr_1.to(device), xtr_2.to(device), ytr.to(device))
+            end_time = time.time()
             
     index_to_name = {'hap': 'Happy', 'neu': 'Neutral', 'sad': 'Sad', 'ang':'Angry'} 
 
-    return {'Prediction':index_to_name[index_to_label[logits.argmax().item()]], 'logits': {index_to_label[k]:f'{logits[0,k].item():.4f}' for k in index_to_label.keys()}}
+    return {'Time': (end_time - start_time), 'Prediction':index_to_name[index_to_label[logits.argmax().item()]], 'logits': {index_to_label[k]:f'{logits[0,k].item():.4f}' for k in index_to_label.keys()}}
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='CA_SER Model', description='Infer with an audio file')
@@ -88,7 +93,19 @@ if __name__ == '__main__':
     
     torch.manual_seed(42)
     torch.cuda.manual_seed_all(42)
-    model = SER2_transformer_block(40, 512,512,4,256);
+    model = SER2_transformer_block_alpha(
+        n_mfcc=40,
+        input_dim_mfcc=512,
+        input_dim_wav=512,
+        n_heads=8,
+        embed_dim=256,
+        num_encoders=3,
+        n_heads_att=4,
+        n_labels=4,
+        alpha=0.4,
+        pooling="max",
+        loss='focal',
+    )
     model.load_state_dict(torch.load(args.checkpoint)['model_state_dict']);
     results = infer_model(model, args.audio_path, args.device)
     
