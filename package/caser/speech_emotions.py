@@ -1,6 +1,6 @@
 from caser.imports import *
 from caser.run import *
-from caser.models import SER2_transformer_block
+from caser.models import SER2_transformer_block_alpha
 from caser.prepare_dataset import *
 import gdown
 import sounddevice as sd
@@ -23,7 +23,19 @@ def find_path(model_name):
 class CaserEmotionModel:
     def __init__(self, model_name='caser', device='cpu'):
         self.device = device
-        self.model= SER2_transformer_block(40, 512,512,8,256, 4)
+        self.model= SER2_transformer_block_alpha(
+        n_mfcc=40,
+        input_dim_mfcc=512,
+        input_dim_wav=512,
+        n_heads=8,
+        embed_dim=256,
+        num_encoders=3,
+        n_heads_att=4,
+        n_labels=4,
+        alpha=0.4,
+        pooling="max",
+        loss='focal',
+    )
         model_path = find_path(model_name)
         print(model_path)
         self.model.load_state_dict(torch.load(model_path))
