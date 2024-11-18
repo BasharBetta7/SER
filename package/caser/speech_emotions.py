@@ -1,7 +1,7 @@
-from caser.imports import *
-from caser.run import *
-from caser.models import SER2_transformer_block_alpha
-from caser.prepare_dataset import *
+from .imports import *
+from .run import *
+from .models import SER2_transformer_block_alpha
+from .prepare_dataset import *
 import gdown
 import sounddevice as sd
 import time
@@ -10,12 +10,14 @@ def find_path(model_name):
     model_file=model_name+'.pt'
 
     cache_dir = os.path.join(os.path.expanduser('~'), '.caser')
+    print(cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
     fpath=os.path.join(cache_dir,model_file)
     if not os.path.isfile(fpath):
-        print('Downloading pre-trained model..')
-        id = '1__JtzlJRF4tyH4-bjQk7a6Nw7AC-Mgau'
+        print('Downloading pre-trained model from checkpoint..')
+        id = '1bjIG_2EedMpld9UV9BEo86PgRAncbcUJ'
         gdown.download(id=id, output=fpath)
+    print(f"checkpoint exists in {fpath}")
     return fpath     
    
 
@@ -37,7 +39,7 @@ class CaserEmotionModel:
         loss='focal',
     )
         model_path = find_path(model_name)
-        print(model_path)
+        
         self.model.load_state_dict(torch.load(model_path))
         self.model.to(self.device)
         self.model.eval()

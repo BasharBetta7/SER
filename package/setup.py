@@ -14,7 +14,7 @@ requirements = ['librosa==0.10.1',
 ]
 
 setup(name='caser',
-      version='0.1',
+      version='0.1.2',
       author='Bashar M. Deeb',
       author_email='Bashar.betta9@gmail.com',
       packages=find_packages('.'),

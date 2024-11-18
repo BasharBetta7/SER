@@ -7,9 +7,9 @@
 # extract results : accuracy plots, confusion matrix
 # save results in external file
 
-from imports import *
-from models2 import *
-from prepare_dataset import prepare_dataset_csv, IEMOCAP_Dataset
+from .imports import *
+from .models import *
+from .prepare_dataset import prepare_dataset_csv, IEMOCAP_Dataset
 
 
 class Config:

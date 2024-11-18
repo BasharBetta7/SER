@@ -12,3 +12,4 @@ caser.egg-info/SOURCES.txt
 caser.egg-info/dependency_links.txt
 caser.egg-info/requires.txt
 caser.egg-info/top_level.txt
+tests/test.py
