@@ -105,33 +105,46 @@ class CaserEmotionModel:
     
         
     # predict emotion for an audio file from path
-
+    @torch.no_grad()
     def predict_emotion(self, audio_path, return_logits=True):
-        wav, sr = librosa.load(audio_path, sr=16000)
-        features = self.extract_features(wav)     
-        
-        # create dataloaders
-        dl = DataLoader(
-            dataset=[features],
-            batch_size=1,
-            shuffle=False,
-            num_workers=1,
-            collate_fn=self.collate,
-        )
-        logits = None
         start_time = time.time()
-        for i, batch_dict in enumerate(dl):
-                xtr_1 = batch_dict["batch_audio"]
-                xtr_2 = batch_dict["batch_mfcc"]
-                ytr = batch_dict["batch_labels"]
+        wav, sr = librosa.load(audio_path, sr=16000)
+        features = self.extract_features(wav) 
+        
+        batch_audio = [features['audio_input']]
+        target_labels = [features["label"]]
 
-                # forward pass:
-                logits, loss = self.model(xtr_1.to(self.device), xtr_2.to(self.device), ytr.to(self.device))
+        batch_audio = [{"input_values": audio} for audio in batch_audio]
+        batch_audio = audio_processor.pad(
+            batch_audio,
+            padding=True,
+            return_tensors="pt",
+        ).input_values
+
+        mfcc = torch.tensor(
+            np.array([extract_mfcc(audio, 16000) for audio in batch_audio])
+        )
+
+        batch_audio = audio_processor(
+            batch_audio, sampling_rate=16000, return_tensors="pt"
+        ).input_values[0]    
+        
+
+        
+        logits = None
+        xtr_1 = batch_audio
+        xtr_2 = mfcc
+        ytr = torch.tensor(target_labels, dtype=torch.long) # not important during inference
+        # print('TESTING IF THIS COULD IS WORKING')
+        # print(xtr_1.shape, xtr_2.shape, ytr.shape)
+        
+        with torch.no_grad():   
+            # forward pass:
+            logits, loss = self.model(xtr_1.to(self.device), xtr_2.to(self.device), ytr.to(self.device))
        
         index_to_name = {'hap': 'Happy', 'neu': 'Neutral', 'sad': 'Sad', 'ang':'Angry'} 
         end_time = time.time()
-        if return_logits:
-            
+        if return_logits:  
             return {'Time':(end_time- start_time),'Prediction':index_to_name[index_to_label[logits.argmax().item()]], 'logits': {index_to_label[k]:f'{logits[0,k].item():.4f}' for k in index_to_label.keys()}}
 
         else:

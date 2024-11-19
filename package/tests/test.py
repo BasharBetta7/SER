@@ -2,4 +2,6 @@ from caser.speech_emotions import CaserEmotionModel
 
 
 er = CaserEmotionModel(model_name='caser', device='cuda')
-print(er.predict_emotion(''))
+
+# predict emotion from audio file:
+print(er.predict_emotion(audio_path='../samples/angry​.mp3'))
